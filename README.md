@@ -7,18 +7,28 @@ Phone-first, single-page HTML5 canvas prototype (vanilla JS, no build step, no C
 ## Controls
 - **Drag anywhere** on the map: virtual joystick, the monarch walks that way (WASD/arrows on desktop).
 - **Auto-attack:** the monarch hits the nearest enemy in reach. **Tap an enemy** to focus it.
-- **Bottom bar:** Wall (5) · Tower (15) · Archer (10) · Cancel. Pick Wall/Tower, then tap a spot inside your land (warm ground with a blue rim). It stays selected for repeat placement until Cancel.
-- **Night / Day** (top right) is a debug skip. `N` on a keyboard does the same.
+- **Bottom bar (portrait):**
+  - **Build** opens Wall 4 · Tower 12 · Farm 8 · House 6. Pick one, then tap inside your land. You pay and a **scaffold** appears, and a free **Builder** walks over and builds it (progress bar). With no builder it stays a scaffold. Build stays selected for repeats; tap **Cancel** (same button) to stop.
+  - **Drop coin** drops one coin at the monarch's feet; **hold** to keep dropping (Space on desktop). The coin falls, and the nearest valid target within reach claims it: a **vagrant** (recruited, if you have housing) or a **tool stand**. Unclaimed coins stay on the ground; walk away and back over them to pick them up.
+  - **Rally** makes nearby archers follow you; tap again to send them back to guard.
+- `?debug=1` shows the old ⏭ day/night skip (and `N` key). It is hidden in normal play.
 
-## Loop
-- 7 Voronoi regions (seeded). You start with **Crownhold** (blue). Wild regions (green) each have a **Guardian**. Red arrows at the screen edge point to off-screen guardians.
-- Kill a guardian to capture its region. Some regions include a free **Encampment Fort** (strong tower) or **Ruin Keep** (450 HP banner).
-- Coins: +1 per owned region every 3 s by day, plus kills (undead 2, necromancer 10, guardian 15, warden 25).
-- Day is 60 s, night is 45 s. At night an ordered wave of shamblers and skeletons comes from one direction (an unowned region or the map edge), led by a **Necromancer** (purple, ringed). While he lives they all focus one region's banner. Kill him and the rest wander chaotically, and any Pale Warden is weakened by 40%.
-- Walls block undead, which stop and chew through them. Towers auto-shoot undead. Archers follow the monarch and shoot.
-- If undead destroy a region's banner, the region turns **Pale Host** (grey). Your walls and towers stay but turn enemy (green, ☠), and enemy towers shoot you and your archers. A **Pale Warden** appears.
-- Retake: kill the Warden (tougher than a guardian, and its towers fire on you). The region flips back and the buildings return to you at 60% HP.
-- Game over (with Restart) when the monarch dies or every region is lost.
+## Kingdom economy (Two Crowns style)
+- **Vagrants** live at the **Vagrant camp** just inside the nearest wild region (an edge arrow points to it). New ones show up every 18 s (max 4). Drop a coin on one and they walk home as a **Villager**.
+- **Housing:** the keep gives 1 slot, every built **House** gives 2. You start with 1 House and 1 **Builder** (1/3 used). Every villager, builder, farmer and archer counts. With housing full, vagrants ignore coins (the coin waits on the ground and is taken as soon as a House finishes).
+- **Tool stands** by the keep: **Bow 4** → Archer, **Hammer 3** → Builder, **Scythe 4** → Farmer. Drop coins on a stand to pay; the tool appears on the rack (max 3) and an idle villager walks over and takes it.
+- **Builders** build scaffolds, and by day they repair damaged buildings and banners.
+- **Farms** pay +1 coin every 5 s by day, **only while a Farmer works them**. Passive income is now small (+1 per region every 10 s by day).
+- **Archers** do not follow by default. They guard posts (towers first, then banners, then walls), patrol around them by day and hold position at night, shooting anything in range.
+
+## Night and the Pale Host
+- Day 60 s, night 45 s. The **Necromancer** picks the weakest, most exposed banner and marches from the nearest wild/Pale land. While he lives the wave hits 25% harder and he **raises a skeleton every 5 s**. Kill him and the rest scatter, and a nearby Pale Warden is weakened by 40%.
+- Wave size: 2 + 7 × nights survived + 2 × (extra regions held), plus the necromancer.
+- If undead destroy a region's banner, it turns **Pale Host**. Finished buildings flip to them (towers shoot you); unfinished scaffolds collapse. Kill the **Pale Warden** to retake it and get buildings back at 60% HP.
+- Balance check (headless sim, 4 seeds): an undefended outpost falls on night 1–2; one tower + one archer falls around night 3–5; a region with the free Fort plus a tower can hold.
+
+## Tuning
+All knobs are in `TUNE` at the top of `game.js` (start coins, slots per house, costs, build times, farm rate, vagrant spawn, banner HP, wave scaling, necromancer raise rate, rally range).
 
 ## Visual style
 The look is original and procedural (baked terrain plus pre-rendered canvas sprites — nothing is loaded from a CDN or taken from another game). It aims at the same read as a minimalist low-poly kingdom game: warm pastel grass and sand, soft blue water, terracotta roofs, chunky silhouettes, and gentle shadows.
@@ -32,10 +42,11 @@ The look is original and procedural (baked terrain plus pre-rendered canvas spri
 
 ## Placeholder / stubbed
 - There is no audio and no save.
-- Units are only the Monarch and Archer. Villager, Builder, Farmer, Scout and Miner are not in yet. Building is instant, with no builders.
+- Units: Monarch, Vagrant, Villager, Builder, Farmer, Archer. Scout, Miner, Pikeman and Knight are not in yet. Archers don't hunt animals yet (there are none).
+- New entities (vagrant, villager, builder, farmer, tool stands, farm, house, scaffold, camp) use simple placeholder art in the same procedural style until the art pass.
 - No Wood > Stone > Iron tech tiers, and the map has no fog of war or terrain.
 - "Smart" undead only means focusing one target. They don't yet claim new regions or man towers on their own beyond the flip-on-loss.
 - The map is a fixed 2400×2400 world, not infinite.
 
 ## Test hooks
-`window.__bc`: `S` (state), `teleport(x,y)`, `coins(n)`, `heal()`, `forceLose(regionId)`, `skipPhase()`, `guardianOf(id)`, `w2s`/`s2w`.
+`window.__bc`: `S` (state), `teleport(x,y)`, `coins(n)`, `heal()`, `forceLose(regionId)`, `skipPhase()`, `guardianOf(id)`, `w2s`/`s2w`, `timeScale` (set >1 to fast-forward), `TUNE`, `dropCoin()`, `workers()`, `housingCap()`, `toggleRally()`.

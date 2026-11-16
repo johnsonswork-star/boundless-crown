@@ -26,6 +26,7 @@ canvas{position:fixed;inset:0;display:block;touch-action:none}
 #hpText{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:5px;
   font-weight:800;font-size:16px;color:#fff6e4;text-shadow:0 1px 2px rgba(0,0,0,.85)}
 #hpText .ico{width:16px;height:16px}
+.dbg[hidden]{display:none}
 .dbg{pointer-events:auto;display:inline-flex;align-items:center;justify-content:center;gap:4px;
   background:linear-gradient(#4a3828,#2c2118);color:#fff6e4;border:2px solid #e6c27a;border-radius:14px;
   font-size:15px;font-weight:800;padding:0 12px;height:32px;box-shadow:0 2px 0 #120e0a}
@@ -48,6 +49,27 @@ canvas{position:fixed;inset:0;display:block;touch-action:none}
 #bar button b{font-size:14px;font-weight:800}
 #bar button i{font-style:normal;font-size:15px;color:#ffd56a;font-weight:900;display:flex;align-items:center;gap:3px;min-height:16px}
 #bar button i .ico{width:13px;height:13px}
+#bar #btnDrop{flex:1.35;border-color:#e6c27a;background:linear-gradient(#5a4326,#3a2a18)}
+#bar #btnDrop .ico.big{color:#ffd56a;width:32px;height:32px}
+#bar #btnDrop i{color:#f3e6cf;font-size:12px;font-weight:800}
+#bar #btnDrop.held{background:linear-gradient(#ffe08a,#e2b14a);color:#2a1c10}
+#bar #btnDrop.held .ico.big,#bar #btnDrop.held i{color:#6a4010}
+#bar #btnBuild.open{border-color:#fff6d2}
+#bar #btnRally i{color:#f3e6cf}
+#bar #btnRally.sel i{color:#6a4010}
+#buildMenu{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom) + 108px);display:flex;gap:6px;padding:8px;
+  background:linear-gradient(#3a2c22,#241910);border:3px solid #e6c27a;border-radius:18px;z-index:7;box-shadow:0 10px 26px rgba(0,0,0,.4)}
+#buildMenu[hidden]{display:none}
+#buildMenu button{flex:1;height:76px;border-radius:14px;border:3px solid #8c7352;background:#2a2118;color:#fff6e4;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;line-height:1.05;padding:4px 0 2px}
+#buildMenu button.close{flex:.6}
+#buildMenu .ico.big{width:28px;height:28px;color:#f0d7a4}
+#buildMenu b{font-size:14px;font-weight:800}
+#buildMenu i{font-style:normal;font-size:15px;color:#ffd56a;font-weight:900;display:flex;align-items:center;gap:3px}
+#buildMenu i .ico{width:13px;height:13px}
+#buildMenu button:active{transform:scale(.97)}
+#hWorkers{flex:none;padding:0 12px;height:32px}
+#hWorkers.full{border-color:#ff8d7a}
 #bar button.sel{background:linear-gradient(#ffe08a,#e2b14a);border-color:#fff6d2;color:#2a1c10}
 #bar button.sel .ico.big,#bar button.sel i{color:#6a4010}
 #bar button:active{transform:scale(.97)}

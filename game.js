@@ -4,7 +4,27 @@
 'use strict';
 const W = 2400, H = 2400, CX = W / 2, CY = H / 2;
 const DAY = 60, NIGHT = 45, CELL = 8, GW = W / CELL, GH = H / CELL;
-const COST = { wall: 5, tower: 15, archer: 10 };
+const COST = { wall: 4, tower: 12, farm: 8, house: 6 };
+const NICE = { wall: 'Wall', tower: 'Tower', farm: 'Farm', house: 'House', fort: 'Fort' };
+const TOOL = {
+  bow:    { cost: 4, role: 'archer',  label: 'Bow' },
+  hammer: { cost: 3, role: 'builder', label: 'Hammer' },
+  scythe: { cost: 4, role: 'farmer',  label: 'Scythe' },
+};
+// Tuning knobs (Kingdom-style economy). All in one place for playtest iteration.
+const TUNE = {
+  startCoins: 12, keepSlots: 1, houseSlots: 2, startHouses: 1, startBuilders: 1,
+  trickleEvery: 10,              // +1 coin per owned region every N s by day (small passive)
+  dropRange: 64, pickupGrace: 0.6, standMax: 3,
+  vagrantEvery: 18, vagrantMax: 4, vagrantStart: 2,
+  buildTime: { wall: 4, tower: 8, farm: 5, house: 6 }, repairRate: 14,
+  farmEvery: 5, farmCoins: 1,    // a worked farm pays farmCoins every farmEvery s, by day
+  coreHome: 280, coreCaptured: 150, coreRetaken: 130, coreKeep: 320,
+  waveBase: 2, wavePerNight: 7, wavePerRegion: 2,
+  necroRaiseEvery: 5, leaderDmg: 1.25,
+  guardianLeash: 220, rallyRange: 280, folkSpeed: 72,
+};
+const DEBUG = new URLSearchParams(location.search).get('debug') === '1';
 const NAMES = ['Crownhold', 'Ashford', 'Briarmoor', 'Coldwater', 'Duskfen', 'Elmreach', 'Frostgate', 'Gloamwood'];
 const UNDEAD = {
   shambler: { hp: 30, speed: 42, dmg: 6, r: 12, coin: 2, col: '#b9c9a3' },
@@ -13,8 +33,10 @@ const UNDEAD = {
 };
 const BLD = {
   wall:  { hp: 160, r: 16 },
-  tower: { hp: 120, r: 16, range: 230, cd: 0.7, dmg: 14 },
-  fort:  { hp: 300, r: 22, range: 250, cd: 0.6, dmg: 18 },
+  tower: { hp: 120, r: 16, range: 220, cd: 0.8, dmg: 12 },
+  fort:  { hp: 260, r: 22, range: 220, cd: 0.8, dmg: 13 },
+  farm:  { hp: 70, r: 24 },
+  house: { hp: 130, r: 18 },
 };
 
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
@@ -48,11 +70,13 @@ function newGame() {
   const seed = (+q.get('seed')) || ((Math.random() * 1e9) | 0);
   const rnd = mulberry(seed);
   S = {
-    seed, t: 0, phase: 'day', phaseT: DAY, day: 1, nights: 0, coins: 30, trickle: 0,
+    seed, t: 0, phase: 'day', phaseT: DAY, day: 1, nights: 0, coins: TUNE.startCoins, trickle: 0,
     regions: [], buildings: [], archers: [], undead: [], guardians: [], fx: [],
+    folk: [], drops: [], stands: [], camp: null, vagrantT: TUNE.vagrantEvery, rally: false, dropHold: false, dropT: 0, postT: 0,
     spawnQ: [], spawnT: 0, spawnGap: 1, leader: null, chaos: false, focus: null, waveSrc: null,
     build: null, over: false, kills: 0, mapDirty: true,
-    stats: { towerShots: 0, paleTowerShots: 0, spawned: 0, captures: 0, losses: 0, retakes: 0 },
+    stats: { towerShots: 0, paleTowerShots: 0, spawned: 0, captures: 0, losses: 0, retakes: 0,
+      dropped: 0, recruits: 0, tools: 0, roles: 0, built: 0, farmCoins: 0, raised: 0, folkLost: 0 },
     monarch: { x: 0, y: 0, r: 16, hp: 120, max: 120, cd: 0, target: null, speed: 190, vx: 0, vy: 0, face: 0 },
     nightK: 0,
   };
@@ -68,7 +92,7 @@ function newGame() {
   for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) grid[gy * GW + gx] = regionIdAt(gx * CELL + CELL / 2, gy * CELL + CELL / 2);
   const home = S.regions[0];
   home.owner = 'player';
-  home.core = mkCore(home, 300);
+  home.core = mkCore(home, TUNE.coreHome);
   for (const r of S.regions) {
     if (r.id === 0) continue;
     r.bonus = rnd() < 0.6 ? (rnd() < 0.5 ? 'fort' : 'keep') : null;
@@ -76,14 +100,42 @@ function newGame() {
     S.guardians.push({ kind: 'guardian', name: 'Guardian', x: r.x, y: r.y, hx: r.x, hy: r.y, r: 22,
       hp: Math.round(140 + d * 0.08), max: Math.round(140 + d * 0.08), dmg: 9, cd: 0, region: r.id });
   }
-  S.monarch.x = home.x; S.monarch.y = home.y + 60;
+  S.monarch.x = home.x; S.monarch.y = home.y + 40;
   S.focus = null;
+  setupHome();
   buildDecor();
   bakeGround();
   $('over').hidden = true;
   $('bar').hidden = false;
-  setBuild(null);
-  toast('Capture regions by beating their Guardians', '');
+  setBuild(null); showMenu(false);
+  $('btnRally').classList.remove('sel');
+  toast('Drop coins on vagrants and tool stands to grow your kingdom', '');
+}
+function mkBld(type, x, y, rid, built) {
+  const spec = BLD[type];
+  return { type, x, y, r: spec.r, hp: built ? spec.hp : Math.ceil(spec.hp * 0.15), max: spec.hp, owner: 'player', region: rid, cd: 0, built: built ? 1 : 0 };
+}
+function mkFolk(role, x, y) {
+  return { type: 'folk', role, x, y, r: 9, hp: 24, max: 24, tx: null, ty: null, wt: 0, ph: Math.random() * 6.28, job: null, stand: null, state: 'idle' };
+}
+function setupHome() {
+  const h = S.regions[0];
+  for (let i = 0; i < TUNE.startHouses; i++) S.buildings.push(mkBld('house', h.x + 100 + i * 46, h.y - 24, 0, 1));
+  S.stands = [['bow', -72], ['hammer', 0], ['scythe', 72]].map(([tool, dx]) => ({ tool, x: h.x + dx, y: h.y + 110, r: 14, paid: 0, tools: 0 }));
+  for (let i = 0; i < TUNE.startBuilders; i++) S.folk.push(mkFolk('builder', h.x - 46 + i * 18, h.y + 50));
+  // vagrant camp: just inside the nearest wild region, as far from its guardian as possible
+  const wild = S.regions.filter(r => r.id !== 0).sort((a, b) => dist(a, h) - dist(b, h))[0];
+  let camp = null;
+  for (let t = 0.47; t >= 0.15; t -= 0.01) {
+    const x = wild.x + (h.x - wild.x) * t, y = wild.y + (h.y - wild.y) * t;
+    if (regionIdAt(x, y) === wild.id && regionIdAt(x, y + 40) === wild.id) { camp = { x, y, region: wild.id }; break; }
+  }
+  S.camp = camp || { x: wild.x + (h.x - wild.x) * 0.3, y: wild.y + (h.y - wild.y) * 0.3, region: wild.id };
+  for (let i = 0; i < TUNE.vagrantStart; i++) spawnVagrant();
+}
+function spawnVagrant() {
+  const c = S.camp; if (!c) return;
+  S.folk.push(mkFolk('vagrant', c.x + (Math.random() - .5) * 60, c.y + 10 + (Math.random() - .5) * 40));
 }
 function mkRegion(id, x, y) { return { id, x, y, name: NAMES[id], owner: 'wild', core: null, bonus: null, weakened: false }; }
 function mkCore(r, hp) { return { type: 'core', x: r.x, y: r.y, r: 20, hp, max: hp, region: r.id, keep: false }; }
@@ -116,7 +168,11 @@ const endPtr = e => {
   ptr = null;
 };
 cv.addEventListener('pointerup', endPtr); cv.addEventListener('pointercancel', endPtr);
-addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key === 'n') skipPhase(); });
+addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === 'n' && DEBUG) skipPhase();
+  if (e.key === ' ' && !e.repeat) dropCoin();
+});
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
@@ -126,18 +182,50 @@ document.addEventListener('contextmenu', e => e.preventDefault());
 $('bar').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || !S || S.over) return;
   const a = b.dataset.act;
-  if (a === 'cancel') return setBuild(null);
-  if (a === 'archer') return recruitArcher();
-  setBuild(a); // stays selected for repeat placement; Cancel exits
+  if (a === 'build') { if (S.build) setBuild(null); else showMenu($('buildMenu').hidden); return; }
+  if (a === 'rally') { showMenu(false); toggleRally(); }
 });
-$('btnSkip').addEventListener('click', () => skipPhase());
+$('buildMenu').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || !S || S.over) return;
+  showMenu(false);
+  if (b.dataset.act !== 'close') setBuild(b.dataset.act); // stays selected for repeat placement
+});
+const dropBtn = $('btnDrop');
+dropBtn.addEventListener('pointerdown', e => {
+  e.preventDefault(); if (!S || S.over) return;
+  showMenu(false);
+  S.dropHold = true; S.dropT = 0.4; dropCoin();
+  try { dropBtn.setPointerCapture(e.pointerId); } catch (_) {}
+  dropBtn.classList.add('held');
+});
+const dropEnd = () => { if (S) S.dropHold = false; dropBtn.classList.remove('held'); };
+for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) dropBtn.addEventListener(t, dropEnd);
+$('btnSkip').hidden = !DEBUG;
+$('btnSkip').addEventListener('click', () => { if (DEBUG) skipPhase(); });
 $('btnRestart').addEventListener('click', () => newGame());
 
 function setBuild(t) {
   if (!S) return;
   S.build = t; S.mapDirty = true;
-  for (const b of document.querySelectorAll('#bar button')) b.classList.toggle('sel', !!t && b.dataset.act === t);
-  $('hint').textContent = t ? `Tap inside your land to place a ${t}  ·  ${COST[t]} coins` : '';
+  const bb = $('btnBuild');
+  bb.classList.toggle('sel', !!t);
+  bb.querySelector('b').textContent = t ? 'Cancel' : 'Build';
+  bb.querySelector('i').textContent = t ? NICE[t] : 'menu';
+  $('hint').textContent = t ? `Tap your land to order a ${NICE[t]} · ${COST[t]} coins` : '';
+}
+function showMenu(on) {
+  $('buildMenu').hidden = !on;
+  $('btnBuild').classList.toggle('open', !!on);
+}
+function toggleRally() {
+  S.rally = !S.rally;
+  let n = 0;
+  for (const a of S.archers) {
+    if (S.rally) { if (dist(a, S.monarch) < TUNE.rallyRange) { a.follow = true; n++; } }
+    else a.follow = false;
+  }
+  $('btnRally').classList.toggle('sel', S.rally);
+  toast(S.rally ? (n ? `Rally! ${n} archer${n === 1 ? '' : 's'} follow you` : 'Rally: no archers nearby') : 'Archers return to guard duty', S.rally ? 'good' : '');
 }
 
 function camera() {
@@ -163,46 +251,240 @@ function tryPlace(type, x, y) {
   if (x < 20 || y < 20 || x > W - 20 || y > H - 20) return;
   if (S.coins < COST[type]) return toast(`Need ${COST[type]} coins`, 'bad');
   if (r.core && dist(r.core, { x, y }) < 40) return toast('Too close to the banner', 'bad');
-  for (const b of S.buildings) if (dist(b, { x, y }) < b.r + 16) return toast('Spot taken', 'bad');
+  const rr = BLD[type].r;
+  for (const b of S.buildings) if (dist(b, { x, y }) < b.r + rr + 2) return toast('Spot taken', 'bad');
+  for (const s of S.stands) if (dist(s, { x, y }) < rr + 22) return toast('Too close to a tool stand', 'bad');
   S.coins -= COST[type];
-  const spec = BLD[type];
-  const b = { type, x, y, r: spec.r, hp: spec.hp, max: spec.hp, owner: 'player', region: rid, cd: 0 };
+  const b = mkBld(type, x, y, rid, 0);
   S.buildings.push(b);
+  floatTxt(x, y - 30, '-' + COST[type], '#ffb0a0');
+  const nb = S.folk.filter(f => f.role === 'builder').length;
+  toast(nb ? `${NICE[type]} ordered — a Builder is on the way` : `${NICE[type]} ordered — buy a hammer to get a Builder`, nb ? '' : 'bad');
   return b;
 }
 
-function recruitArcher() {
-  if (S.coins < COST.archer) return toast(`Need ${COST.archer} coins`, 'bad');
-  const r = S.regions[regionIdAt(S.monarch.x, S.monarch.y)];
-  if (r.owner !== 'player') return toast('Recruit inside your own land', 'bad');
-  S.coins -= COST.archer;
-  const a = { type: 'archer', x: S.monarch.x + (Math.random() - .5) * 40, y: S.monarch.y + 30, r: 10, hp: 40, max: 40, cd: 0,
-    slot: S.archers.length };
-  S.archers.push(a);
-  toast('Archer recruited — they follow you', 'good');
+// ---------- coin economy (Kingdom-style coin drops) ----------
+function floatTxt(x, y, txt, col) { S.fx.push({ k: 'txt', x, y, txt, col: col || '#ffd56a', t: 1.1, t0: 1.1 }); }
+function workers() { let n = S.archers.length; for (const f of S.folk) if (f.role !== 'vagrant') n++; return n; }
+function housingCap() {
+  let c = S.regions[0].owner === 'player' ? TUNE.keepSlots : 0;
+  for (const b of S.buildings) if (b.type === 'house' && b.owner === 'player' && b.built >= 1) c += TUNE.houseSlots;
+  return c;
+}
+function dropCoin() {
+  if (!S || S.over) return false;
+  const m = S.monarch;
+  if (S.coins < 1) { if (S._noCoinT == null || S.t - S._noCoinT > 1.2) { toast('No coins to drop', 'bad'); S._noCoinT = S.t; } return false; }
+  S.coins--; S.stats.dropped++;
+  S.drops.push({ x: m.x + (Math.random() - .5) * 12, y: m.y + 10 + (Math.random() - .5) * 6, z: 34, vz: -60, landed: false, away: false, age: 0, tryT: 0 });
+  floatTxt(m.x + 14, m.y - 50, '-1', '#ffb0a0');
+  return true;
+}
+function claimTarget(d) {
+  let best = null, bd = TUNE.dropRange;
+  if (S.regions[0].owner === 'player') for (const st of S.stands) if (st.tools < TUNE.standMax) { const dd = dist(st, d); if (dd < bd) { bd = dd; best = st; } }
+  const free = workers() < housingCap();
+  d.noHouse = false;
+  for (const f of S.folk) if (f.role === 'vagrant') {
+    const dd = dist(f, d);
+    if (dd < bd) { if (free) { bd = dd; best = f; } else d.noHouse = true; }
+  }
+  return best;
+}
+function applyClaim(t) {
+  if (t.tool) {
+    t.paid++;
+    const c = TOOL[t.tool].cost;
+    if (t.paid >= c) {
+      t.paid = 0; t.tools++; S.stats.tools++;
+      floatTxt(t.x, t.y - 44, TOOL[t.tool].label + ' ready!', '#d6ffb0');
+      toast(`${TOOL[t.tool].label} bought — an idle villager will take it`, 'good');
+    } else floatTxt(t.x, t.y - 40, t.paid + ' / ' + c, '#ffd56a');
+  } else {
+    t.role = 'villager'; t.state = 'home'; t.tx = null; S.stats.recruits++;
+    floatTxt(t.x, t.y - 34, 'Recruited!', '#d6ffb0');
+    toast('Vagrant recruited — walking home as a Villager', 'good');
+  }
+}
+function updateDrops(dt) {
+  const m = S.monarch;
+  for (const d of S.drops) {
+    d.age += dt;
+    if (!d.landed) {
+      d.vz += 760 * dt; d.z -= d.vz * dt;
+      if (d.z <= 0) { d.z = 0; d.landed = true; d.tryT = 0; }
+      continue;
+    }
+    if (!d.away && dist(d, m) > 34) d.away = true;
+    d.tryT -= dt;
+    if (d.tryT <= 0) {
+      d.tryT = 0.4;
+      const t = claimTarget(d);
+      if (t) { d.dead = true; S.fx.push({ k: 'cfly', x: d.x, y: d.y, tx: t.x, ty: t.y - 16, t: 0.32, t0: 0.32 }); applyClaim(t); continue; }
+      if (d.noHouse && !d.warned) { d.warned = true; toast('No free housing — build a House first', 'bad'); }
+    }
+    if (d.away && d.age > TUNE.pickupGrace && dist(d, m) < 26) { d.dead = true; S.coins++; floatTxt(m.x + 14, m.y - 50, '+1', '#ffd56a'); }
+  }
+  if (S.drops.some(d => d.dead)) S.drops = S.drops.filter(d => !d.dead);
+}
+
+// ---------- workers ----------
+function homeCore() {
+  const h = S.regions[0];
+  if (h.owner === 'player' && h.core) return h.core;
+  const o = owned().find(r => r.core); return o ? o.core : null;
+}
+function moveTo(f, tx, ty, sp, dt) {
+  const d = Math.hypot(tx - f.x, ty - f.y);
+  if (d < 1.5) return true;
+  const s = Math.min(d, sp * dt); f.x += (tx - f.x) / d * s; f.y += (ty - f.y) / d * s;
+  return d < 6;
+}
+function wanderAround(f, cx, cy, rad, dt, sp) {
+  f.wt -= dt;
+  if (f.wt <= 0 || f.tx == null) { f.wt = 2 + Math.random() * 3; const a = Math.random() * 6.283, r = Math.random() * rad; f.tx = cx + Math.cos(a) * r; f.ty = cy + Math.sin(a) * r * 0.7; }
+  moveTo(f, f.tx, f.ty, sp * 0.45, dt);
+}
+function jobValid(j) {
+  if (!j) return false;
+  if (j.type === 'core') { const r = S.regions[j.region]; return r.core === j && r.owner === 'player' && j.hp < j.max; }
+  return S.buildings.includes(j) && j.owner === 'player' && (j.built < 1 || j.hp < j.max);
+}
+function pickBuildJob(f, night) {
+  let best = null, bd = 1e9;
+  const taken = new Set(S.folk.filter(o => o !== f && o.role === 'builder' && o.job).map(o => o.job));
+  for (const b of S.buildings) if (b.owner === 'player' && b.built < 1) {
+    const d = dist(b, f) + (taken.has(b) ? 600 : 0); if (d < bd) { bd = d; best = b; }
+  }
+  if (best || night) return best;
+  for (const b of S.buildings) if (b.owner === 'player' && b.built >= 1 && b.hp < b.max - 0.5) { const d = dist(b, f) + (taken.has(b) ? 600 : 0); if (d < bd) { bd = d; best = b; } }
+  for (const r of owned()) if (r.core && r.core.hp < r.core.max - 0.5) { const d = dist(r.core, f) + (taken.has(r.core) ? 600 : 0); if (d < bd) { bd = d; best = r.core; } }
+  return best;
+}
+function onBuilt(b) {
+  S.stats.built++;
+  floatTxt(b.x, b.y - 40, NICE[b.type] + ' built', '#d6ffb0');
+  if (b.type === 'house') toast(`House built — +${TUNE.houseSlots} worker slots`, 'good');
+  else if (b.type === 'farm') toast('Farm built — a Farmer can work it for coins', 'good');
+}
+function becomeRole(f, role) {
+  S.stats.roles++;
+  if (role === 'archer') {
+    f.dead = true;
+    S.archers.push({ type: 'archer', x: f.x, y: f.y, r: 10, hp: 40, max: 40, cd: 0, follow: false, post: null, slotA: Math.random() * 6.28 });
+  } else { f.role = role; f.job = null; f.tx = null; }
+  floatTxt(f.x, f.y - 34, 'Now a ' + (role === 'archer' ? 'Archer' : role === 'builder' ? 'Builder' : 'Farmer'), '#d6ffb0');
+  toast(`A villager became ${role === 'archer' ? 'an Archer' : 'a ' + (role === 'builder' ? 'Builder' : 'Farmer')}`, 'good');
+}
+function updateFolk(dt) {
+  if (S.camp) {
+    S.vagrantT -= dt;
+    if (S.vagrantT <= 0) { S.vagrantT = TUNE.vagrantEvery; if (S.folk.filter(f => f.role === 'vagrant').length < TUNE.vagrantMax) spawnVagrant(); }
+  }
+  const hc = homeCore(), night = S.phase === 'night', sp = TUNE.folkSpeed;
+  for (const f of S.folk) {
+    f.working = false;
+    if (f.role === 'vagrant') { if (S.camp) wanderAround(f, S.camp.x, S.camp.y + 10, 60, dt, sp); continue; }
+    if (!hc) continue;
+    const ix = hc.x, iy = hc.y + 58;
+    if (f.role === 'villager') {
+      let st = f.stand && f.stand.tools > 0 ? f.stand : null;
+      if (!st) {
+        f.stand = null;
+        for (const s of S.stands) if (s.tools > S.folk.filter(o => o.stand === s).length) { st = s; f.stand = s; break; }
+      }
+      if (st) { if (moveTo(f, st.x, st.y + 8, sp, dt)) { st.tools--; f.stand = null; becomeRole(f, TOOL[st.tool].role); } continue; }
+      if (f.state === 'home') { if (Math.hypot(f.x - ix, f.y - iy) > 50) { moveTo(f, ix, iy, sp, dt); continue; } f.state = 'idle'; }
+      wanderAround(f, ix, iy, 64, dt, sp); continue;
+    }
+    if (f.role === 'builder') {
+      if (f.job && (!jobValid(f.job) || (night && f.job.built !== 0 && !(f.job.built < 1)))) f.job = null;
+      if (!f.job) f.job = pickBuildJob(f, night);
+      const j = f.job;
+      if (j) {
+        const reach = (j.r || 16) + 12;
+        if (dist(f, j) > reach) moveTo(f, j.x - reach * 0.7, j.y + 6, sp, dt);
+        else {
+          f.working = true;
+          if (j.built != null && j.built < 1) {
+            j.built = Math.min(1, j.built + dt / TUNE.buildTime[j.type]);
+            j.hp = Math.max(j.hp, Math.ceil(j.max * Math.max(0.15, j.built)));
+            if (j.built >= 1) { j.hp = j.max; onBuilt(j); f.job = null; }
+          } else {
+            j.hp = Math.min(j.max, j.hp + TUNE.repairRate * dt);
+            if (j.hp >= j.max) { floatTxt(j.x, j.y - 36, 'Repaired', '#d6ffb0'); f.job = null; }
+          }
+        }
+        continue;
+      }
+      wanderAround(f, ix - 30, iy, 50, dt, sp); continue;
+    }
+    if (f.role === 'farmer') {
+      let j = f.job;
+      if (j && (!S.buildings.includes(j) || j.owner !== 'player' || j.built < 1)) { if (j.farmer === f) j.farmer = null; j = f.job = null; }
+      if (!j) {
+        let bd = 1e9;
+        for (const b of S.buildings) if (b.type === 'farm' && b.owner === 'player' && b.built >= 1 && (!b.farmer || b.farmer === f || !S.folk.includes(b.farmer))) { const d = dist(b, f); if (d < bd) { bd = d; j = b; } }
+        if (j) { j.farmer = f; f.job = j; }
+      }
+      if (j) {
+        const tx = j.x + Math.sin(S.t * 0.35 + f.ph) * 14, ty = j.y - 2;
+        if (Math.hypot(f.x - j.x, f.y - j.y) > 22) moveTo(f, tx, ty, sp, dt);
+        else {
+          moveTo(f, tx, ty, 10, dt);
+          if (!night) {
+            f.working = true;
+            j.prog = (j.prog || 0) + dt;
+            if (j.prog >= TUNE.farmEvery) {
+              j.prog -= TUNE.farmEvery; S.coins += TUNE.farmCoins; S.stats.farmCoins += TUNE.farmCoins;
+              floatTxt(j.x, j.y - 30, '+' + TUNE.farmCoins, '#ffd56a');
+              S.fx.push({ k: 'coins', x: j.x, y: j.y - 10, t: 0.8, t0: 0.8, n: TUNE.farmCoins });
+            }
+          }
+        }
+        continue;
+      }
+      wanderAround(f, ix + 30, iy, 50, dt, sp); continue;
+    }
+  }
+  if (S.folk.some(f => f.dead)) S.folk = S.folk.filter(f => !f.dead);
+}
+function assignPosts() {
+  const towers = [], cores = [], walls = [];
+  for (const b of S.buildings) if (b.owner === 'player' && b.built >= 1) {
+    if (b.type === 'tower' || b.type === 'fort') towers.push(b); else if (b.type === 'wall') walls.push(b);
+  }
+  for (const r of owned()) if (r.core) cores.push(r.core);
+  const posts = towers.concat(cores, walls);
+  S.archers.forEach((a, i) => {
+    const want = posts.length ? posts[i % posts.length] : null;
+    if (a.post !== want) { a.post = want; a.tx = null; a.slotA = i * 2.399; }
+  });
 }
 
 // ---------- phases ----------
 function skipPhase() { if (!S || S.over) return; S.phaseT = 0; }
 function startNight() {
   S.phase = 'night'; S.phaseT = NIGHT; S.chaos = false; S.leader = null;
-  const n = 6 + 3 * S.nights + owned().length;
+  const n = TUNE.waveBase + TUNE.wavePerNight * S.nights + TUNE.wavePerRegion * Math.max(0, owned().length - 1);
   const q = [];
   for (let i = 0; i < n; i++) q.push(Math.random() < 0.5 ? 'shambler' : 'skeleton');
   q.splice(Math.min(2, q.length), 0, 'necro');
-  S.spawnQ = q; S.spawnGap = Math.min(1.1, 22 / q.length); S.spawnT = 0.5;
-  // ordered wave: one main source (farthest non-owned region or a map edge)
-  const srcs = S.regions.filter(r => r.owner !== 'player').map(r => ({ x: r.x, y: r.y }));
-  const edges = [{ x: 40, y: Math.random() * H }, { x: W - 40, y: Math.random() * H }, { x: Math.random() * W, y: 40 }, { x: Math.random() * W, y: H - 40 }];
-  const all = srcs.concat(edges);
-  S.waveSrc = all[(Math.random() * all.length) | 0];
+  S.spawnQ = q; S.spawnGap = Math.min(1.0, 16 / q.length); S.spawnT = 0.5;
+  // smart wave: the necromancer picks the weakest, most exposed banner, and marches from the nearest Pale/wild land
   pickFocus();
+  const fr = S.focus != null ? S.regions[S.focus] : S.regions[0];
+  const srcs = S.regions.filter(r => r.owner !== 'player').sort((a, b) => dist(a, fr) - dist(b, fr));
+  const edges = [{ x: 40, y: Math.random() * H }, { x: W - 40, y: Math.random() * H }, { x: Math.random() * W, y: 40 }, { x: Math.random() * W, y: H - 40 }];
+  S.waveSrc = srcs.length ? { x: srcs[0].x, y: srcs[0].y } : edges[(Math.random() * 4) | 0];
   toast(`Night ${S.nights + 1} — the Pale Host marches!`, 'bad');
 }
 function pickFocus() {
   const o = owned().filter(r => r.core); if (!o.length) { S.focus = null; return; }
-  const src = S.waveSrc || { x: CX, y: CY };
-  o.sort((a, b) => dist(a, src) - dist(b, src)); S.focus = o[0].id;
+  const foes = S.regions.filter(r => r.owner !== 'player');
+  const exposure = r => foes.length ? Math.min(...foes.map(f => dist(f, r))) : 0;
+  const score = r => r.core.hp + 0.25 * exposure(r) + (r.id === 0 ? 60 : 0);
+  o.sort((a, b) => score(a) - score(b)); S.focus = o[0].id;
 }
 function startDay() {
   S.phase = 'day'; S.phaseT = DAY; S.nights++; S.day++; S.spawnQ = [];
@@ -210,6 +492,13 @@ function startDay() {
   S.undead = []; S.leader = null; S.chaos = false;
   S.monarch.hp = Math.min(S.monarch.max, S.monarch.hp + 40);
   toast(`Dawn! Night ${S.nights} survived — the dead crumble`, 'good');
+}
+function raiseDead(n) {
+  const s = UNDEAD.skeleton;
+  const u = { type: 'undead', kind: 'skeleton', x: clamp(n.x + (Math.random() - .5) * 50, 10, W - 10), y: clamp(n.y + (Math.random() - .5) * 50, 10, H - 10),
+    r: s.r, hp: s.hp, max: s.hp, speed: s.speed, dmg: s.dmg, cd: 0.5, tgt: null, rt: 0, jit: (Math.random() - .5) };
+  S.undead.push(u); S.stats.spawned++; S.stats.raised++;
+  S.fx.push({ k: 'puff', x: u.x, y: u.y, t: 0.5, t0: 0.5 });
 }
 function spawnUndead(kind) {
   const src = Math.random() < 0.75 && S.waveSrc ? S.waveSrc : (() => {
@@ -225,7 +514,7 @@ function spawnUndead(kind) {
 // ---------- enemies ----------
 function enemiesList() {
   const l = S.undead.concat(S.guardians);
-  for (const b of S.buildings) if (b.owner === 'pale' && b.type !== 'wall') l.push(b);
+  for (const b of S.buildings) if (b.owner === 'pale' && (b.type === 'tower' || b.type === 'fort')) l.push(b);
   return l;
 }
 function damage(e, dmg) {
@@ -251,10 +540,16 @@ function damage(e, dmg) {
     if (e.kind === 'guardian') captureRegion(S.regions[e.region]); else retakeRegion(S.regions[e.region]);
   } else if (e.type === 'core') {
     loseRegion(S.regions[e.region]);
-  } else if (e.type === 'wall' || e.type === 'tower' || e.type === 'fort') {
+  } else if (BLD[e.type] && S.buildings.includes(e)) {
     S.buildings.splice(S.buildings.indexOf(e), 1); S.fx.push({ k: 'puff', x: e.x, y: e.y, t: 0.6, t0: 0.6 });
+    if (e.type === 'house' && e.owner === 'player') toast('A House was destroyed — housing reduced', 'bad');
   } else if (e.type === 'archer') {
-    S.archers.splice(S.archers.indexOf(e), 1);
+    S.archers.splice(S.archers.indexOf(e), 1); S.stats.folkLost++;
+  } else if (e.type === 'folk') {
+    const i = S.folk.indexOf(e); if (i >= 0) S.folk.splice(i, 1);
+    if (e.job && e.job.farmer === e) e.job.farmer = null;
+    S.stats.folkLost++; S.fx.push({ k: 'puff', x: e.x, y: e.y, t: 0.5, t0: 0.5 });
+    toast(`A ${e.role} was slain`, 'bad');
   } else if (e === S.monarch) {
     gameOver('The Monarch has fallen');
   }
@@ -262,18 +557,19 @@ function damage(e, dmg) {
 }
 
 function captureRegion(r) {
-  r.owner = 'player'; r.core = mkCore(r, 250); S.mapDirty = true; S.stats.captures++;
+  r.owner = 'player'; r.core = mkCore(r, TUNE.coreCaptured); S.mapDirty = true; S.stats.captures++;
   S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05 });
   let extra = '';
-  if (r.bonus === 'fort') { S.buildings.push({ type: 'fort', x: r.x + 60, y: r.y + 10, r: BLD.fort.r, hp: BLD.fort.hp, max: BLD.fort.hp, owner: 'player', region: r.id, cd: 0 }); extra = ' +free Encampment Fort'; }
-  if (r.bonus === 'keep') { r.core.keep = true; r.core.max = r.core.hp = 450; extra = ' +free Ruin Keep'; }
+  if (r.bonus === 'fort') { S.buildings.push(mkBld('fort', r.x + 60, r.y + 10, r.id, 1)); extra = ' +free Encampment Fort'; }
+  if (r.bonus === 'keep') { r.core.keep = true; r.core.max = r.core.hp = TUNE.coreKeep; extra = ' +free Ruin Keep'; }
   r.bonus = null;
   toast(`Region captured: ${r.name}!${extra}`, 'good');
 }
 function loseRegion(r) {
   r.owner = 'pale'; r.core = null; S.mapDirty = true; S.stats.losses++;
   S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05, bad: 1 });
-  for (const b of S.buildings) if (b.region === r.id) { b.owner = 'pale'; b.hp = Math.max(b.hp, b.max * 0.5); }
+  S.buildings = S.buildings.filter(b => !(b.region === r.id && b.built < 1)); // unfinished scaffolds collapse
+  for (const b of S.buildings) if (b.region === r.id) { b.owner = 'pale'; b.hp = Math.max(b.hp, b.max * 0.5); if (b.farmer) b.farmer = null; }
   for (const a of S.archers.slice()) if (regionIdAt(a.x, a.y) === r.id && dist(a, S.monarch) > 300) S.archers.splice(S.archers.indexOf(a), 1);
   const hp = r.weakened ? 220 : 360;
   S.guardians.push({ kind: 'warden', name: 'Pale Warden', x: r.x, y: r.y, hx: r.x, hy: r.y, r: 24, hp, max: hp, dmg: 11, cd: 0, region: r.id });
@@ -282,7 +578,7 @@ function loseRegion(r) {
   if (!owned().length) gameOver('All regions lost to the Pale Host');
 }
 function retakeRegion(r) {
-  r.owner = 'player'; r.core = mkCore(r, 180); r.weakened = false; S.mapDirty = true; S.stats.retakes++;
+  r.owner = 'player'; r.core = mkCore(r, TUNE.coreRetaken); r.weakened = false; S.mapDirty = true; S.stats.retakes++;
   S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05 });
   let n = 0;
   for (const b of S.buildings) if (b.region === r.id && b.owner === 'pale') { b.owner = 'player'; b.hp = Math.ceil(b.max * 0.6); n++; }
@@ -295,7 +591,7 @@ function gameOver(why) {
   $('over').hidden = false;
   const box = $('toasts');
   while (box.firstChild) box.firstChild.remove();
-  $('bar').hidden = true;
+  $('bar').hidden = true; showMenu(false); if (S) S.dropHold = false;
   $('hint').textContent = '';
 }
 
@@ -304,7 +600,8 @@ function update(dt) {
   if (S.over) return;
   S.t += dt; S.phaseT -= dt;
   if (S.phaseT <= 0) { if (S.phase === 'day') startNight(); else startDay(); }
-  if (S.phase === 'day') { S.trickle += dt; if (S.trickle >= 3) { S.trickle -= 3; S.coins += owned().length; } }
+  if (S.phase === 'day') { S.trickle += dt; if (S.trickle >= TUNE.trickleEvery) { S.trickle -= TUNE.trickleEvery; S.coins += owned().length; } }
+  if (S.dropHold) { S.dropT -= dt; if (S.dropT <= 0) { S.dropT = 0.22; dropCoin(); } }
   if (S.phase === 'night' && S.spawnQ.length) { S.spawnT -= dt; if (S.spawnT <= 0) { S.spawnT = S.spawnGap; spawnUndead(S.spawnQ.shift()); } }
   const m = S.monarch;
   // movement
@@ -333,7 +630,7 @@ function update(dt) {
   for (const g of S.guardians) {
     const dHome = Math.hypot(m.x - g.hx, m.y - g.hy);
     let tx = g.hx, ty = g.hy;
-    if (dHome < 300) { tx = m.x; ty = m.y; }
+    if (dHome < TUNE.guardianLeash) { tx = m.x; ty = m.y; }
     else g.hp = Math.min(g.max, g.hp + 20 * dt);
     const d = Math.hypot(tx - g.x, ty - g.y);
     if (d > g.r + m.r + 4) { const sp = 85 * dt; g.x += (tx - g.x) / d * Math.min(sp, d); g.y += (ty - g.y) / d * Math.min(sp, d); }
@@ -343,7 +640,7 @@ function update(dt) {
 
   // buildings (towers)
   for (const b of S.buildings) {
-    const spec = BLD[b.type]; if (!spec.range) continue;
+    const spec = BLD[b.type]; if (!spec.range || b.built < 1) continue;
     b.cd -= dt; if (b.cd > 0) continue;
     if (b.owner === 'player') {
       let best = null, bd = spec.range;
@@ -356,12 +653,29 @@ function update(dt) {
     }
   }
 
-  // archers follow the monarch and shoot
-  S.archers.forEach((a, i) => {
-    const ang = (i / Math.max(1, S.archers.length)) * Math.PI * 2 + S.t * 0.2;
-    const tx = m.x + Math.cos(ang) * 55, ty = m.y + Math.sin(ang) * 55;
+  updateDrops(dt);
+  updateFolk(dt);
+  // archers guard posts (towers > banners > walls); Rally makes nearby ones follow the monarch
+  S.postT -= dt; if (S.postT <= 0) { S.postT = 1; assignPosts(); }
+  const followers = S.archers.filter(a => a.follow);
+  S.archers.forEach((a) => {
+    let tx = a.x, ty = a.y, spd = 150;
+    if (a.follow) {
+      const k = followers.indexOf(a);
+      const ang = (k / Math.max(1, followers.length)) * Math.PI * 2 + S.t * 0.2;
+      tx = m.x + Math.cos(ang) * 55; ty = m.y + Math.sin(ang) * 55; spd = 210;
+    } else if (a.post) {
+      const p = a.post, rr = (p.r || 16) + 16;
+      const cx = p.x + Math.cos(a.slotA) * rr, cy = p.y + 10 + Math.sin(a.slotA) * rr * 0.6;
+      if (S.phase === 'night') { tx = cx; ty = cy; }
+      else {
+        a.wt = (a.wt || 0) - dt;
+        if (a.wt <= 0 || a.tx == null) { a.wt = 2.5 + Math.random() * 3; a.tx = cx + (Math.random() - .5) * 120; a.ty = cy + (Math.random() - .5) * 80; }
+        tx = a.tx; ty = a.ty; spd = 55;
+      }
+    }
     const d = Math.hypot(tx - a.x, ty - a.y);
-    if (d > 4) { const sp = Math.min(d, 210 * dt); a.x += (tx - a.x) / d * sp; a.y += (ty - a.y) / d * sp; }
+    if (d > 4) { const sp = Math.min(d, spd * dt); a.x += (tx - a.x) / d * sp; a.y += (ty - a.y) / d * sp; }
     a.cd -= dt;
     if (a.cd <= 0) {
       let best = null, bd = 210;
@@ -371,7 +685,8 @@ function update(dt) {
   });
 
   // undead
-  const playerBlds = S.buildings.filter(b => b.owner === 'player');
+  const playerBlds = S.buildings.filter(b => b.owner === 'player' && b.built >= 1 && b.type !== 'farm');
+  const dmgK = (!S.chaos && S.leader) ? TUNE.leaderDmg : 1;
   for (const u of S.undead.slice()) {
     if (!S.undead.includes(u)) continue;
     u.rt -= dt;
@@ -392,7 +707,8 @@ function update(dt) {
       if (!blocked) { u.x = nx; u.y = ny; }
     }
     u.cd -= dt;
-    if (blocked && u.cd <= 0 && u.kind !== 'necro') { u.cd = 1; damage(blocked, u.dmg); S.fx.push({ k: 'hit', x: blocked.x, y: blocked.y, t: 0.15, t0: 0.15 }); if (S.over) return; }
+    if (u.kind === 'necro' && !S.chaos) { u.raiseT = (u.raiseT == null ? TUNE.necroRaiseEvery : u.raiseT) - dt; if (u.raiseT <= 0) { u.raiseT = TUNE.necroRaiseEvery; raiseDead(u); } }
+    if (blocked && u.cd <= 0 && u.kind !== 'necro') { u.cd = 1; damage(blocked, u.dmg * dmgK); S.fx.push({ k: 'hit', x: blocked.x, y: blocked.y, t: 0.15, t0: 0.15 }); if (S.over) return; }
     if (u.kind === 'necro' && dist(u, m) < 140 && u.cd <= 0) { u.cd = 1.3; S.fx.push({ k: 'arrow', x: u.x, y: u.y - 10, tx: m.x, ty: m.y - 8, t: 0.24, t0: 0.24, c: '#c6ff8a', bolt: 1 }); damage(m, u.dmg); if (S.over) return; }
   }
 
@@ -401,6 +717,7 @@ function update(dt) {
   const decay = e => { if (e.flash > 0) e.flash -= dt; };
   decay(S.monarch);
   for (const a of S.archers) decay(a);
+  for (const f of S.folk) decay(f);
   for (const u of S.undead) decay(u);
   for (const g of S.guardians) decay(g);
   for (const b of S.buildings) decay(b);
@@ -414,6 +731,7 @@ function pickUndeadTarget(u, playerBlds) {
   const m = S.monarch;
   if (dist(u, m) < 150) return m;
   for (const a of S.archers) if (dist(u, a) < 70) return a;
+  for (const f of S.folk) if (f.role !== 'vagrant' && dist(u, f) < 60) return f;
   const cores = owned().filter(r => r.core).map(r => r.core);
   if (!cores.length) return m;
   if (!S.chaos && S.leader && S.focus != null && S.regions[S.focus].core) return S.regions[S.focus].core; // smart: ordered focus
@@ -925,6 +1243,158 @@ function paintNecro(frame) {
   return spr;
 }
 
+
+// ---- new Kingdom-style entities (placeholder art in the same procedural style; see README art requests) ----
+const FOLK_STYLE = {
+  vagrant:  { tunic: '#8f8676', dark: '#6a6256', hood: '#7a6f60', skin: '#d9b48f' },
+  villager: { tunic: '#e4d2a8', dark: '#bfa97c', hood: '#a07850', skin: '#e6b898' },
+  builder:  { tunic: '#e0874a', dark: '#b4602c', hood: '#f0c14a', skin: '#e6b898' },
+  farmer:   { tunic: '#b8c25a', dark: '#8a9440', hood: '#e8d27a', skin: '#e6b898' },
+};
+function paintFolk(role, frame) {
+  const c = FOLK_STYLE[role];
+  const spr = bake(30, 34, g => {
+    const step = frame ? 2 : 0, hunch = role === 'vagrant' ? 1.5 : 0;
+    g.fillStyle = '#5c4030';
+    g.fillRect(10, 24, 3, 8);
+    g.fillRect(16, 24 - step, 3, 8 + step);
+    g.fillStyle = '#3a2a1c';
+    g.fillRect(10, 31, 3.2, 1.6);
+    g.fillRect(16, 31, 3.2, 1.6);
+    ell(g, 14 + hunch, 20, 6, 6.5, c.tunic);
+    ell(g, 16.5 + hunch, 21, 3, 5, c.dark);
+    g.fillStyle = '#6b4630';
+    g.fillRect(9 + hunch, 22, 10, 1.6);
+    disc(g, 14 + hunch * 1.6, 11 + hunch, 3.5, c.skin);
+    if (role === 'builder') { // straw hat
+      ell(g, 14, 9, 6, 1.8, c.hood); ell(g, 14, 7.6, 3.4, 2.6, c.hood);
+    } else if (role === 'farmer') { // wide sun hat
+      ell(g, 14, 9, 7, 2, c.hood); ell(g, 14, 7.4, 3.6, 2.6, '#d4b85a');
+    } else { // hood
+      g.fillStyle = c.hood;
+      g.beginPath(); g.arc(14 + hunch * 1.6, 11 + hunch, 3.9, Math.PI * 1.05, Math.PI * 1.95); g.quadraticCurveTo(18.5, 6 + hunch, 14 + hunch, 4.4 + hunch); g.quadraticCurveTo(9.5, 6, 10, 11 + hunch); g.fill();
+    }
+    disc(g, 15.3 + hunch * 1.6, 11.2 + hunch, 0.5, '#2a1c10');
+    if (role === 'vagrant') { // bindle + patch
+      g.strokeStyle = '#6b4630'; g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(9, 22); g.lineTo(4, 10); g.stroke();
+      disc(g, 4, 9, 3, '#c4473a'); disc(g, 3.4, 8.4, 1, '#e8a090');
+      g.fillStyle = '#a89c86'; g.fillRect(15, 19, 3, 3);
+    } else if (role === 'builder') { // hammer
+      g.strokeStyle = '#6b4630'; g.lineWidth = 1.5;
+      g.beginPath(); g.moveTo(20, 22); g.lineTo(24, 13); g.stroke();
+      g.fillStyle = '#9aa0a8'; g.fillRect(21.2, 10.4, 6, 3.4);
+    } else if (role === 'farmer') { // scythe
+      g.strokeStyle = '#6b4630'; g.lineWidth = 1.3;
+      g.beginPath(); g.moveTo(21, 30); g.lineTo(23, 6); g.stroke();
+      g.strokeStyle = '#d5dde4'; g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(23, 6); g.quadraticCurveTo(17, 4, 13, 8); g.stroke();
+    } else { // villager: little sack
+      ell(g, 20, 22, 2.6, 3, '#c9a874');
+    }
+  });
+  spr.gy = 33;
+  return spr;
+}
+function paintToolIcon(tool) {
+  return bake(16, 18, g => {
+    if (tool === 'bow') {
+      g.strokeStyle = '#8b5a32'; g.lineWidth = 1.8; g.beginPath(); g.arc(4, 9, 7, -1.2, 1.2); g.stroke();
+      g.strokeStyle = '#f4ead8'; g.lineWidth = 0.7; g.beginPath(); g.moveTo(6.5, 2.4); g.lineTo(6.5, 15.6); g.stroke();
+    } else if (tool === 'hammer') {
+      g.strokeStyle = '#8b5a32'; g.lineWidth = 2; g.beginPath(); g.moveTo(8, 17); g.lineTo(8, 5); g.stroke();
+      g.fillStyle = '#9aa0a8'; g.fillRect(3, 2, 10, 4.4); g.fillStyle = '#c9ced4'; g.fillRect(3, 2, 10, 1.4);
+    } else {
+      g.strokeStyle = '#8b5a32'; g.lineWidth = 1.6; g.beginPath(); g.moveTo(10, 17); g.lineTo(11, 2); g.stroke();
+      g.strokeStyle = '#d5dde4'; g.lineWidth = 1.8; g.beginPath(); g.moveTo(11, 2.5); g.quadraticCurveTo(5, 1, 1.5, 6); g.stroke();
+    }
+  });
+}
+function paintStand() {
+  const spr = bake(40, 34, g => {
+    ell(g, 20, 30, 16, 3.4, '#a8885a');
+    g.fillStyle = '#6e4328'; g.fillRect(5, 8, 3, 23); g.fillRect(32, 8, 3, 23);
+    g.fillStyle = '#8b5a32'; g.fillRect(6, 8, 1.4, 23); g.fillRect(33, 8, 1.4, 23);
+    g.fillStyle = '#b07a45'; g.fillRect(3, 9, 34, 3.4); g.fillStyle = '#d2a56c'; g.fillRect(3, 9, 34, 1.2);
+    g.fillStyle = '#b07a45'; g.fillRect(5, 24, 30, 2.4);
+    poly(g, [[1, 9], [20, 1], [39, 9]], '#d06a45');
+    poly(g, [[20, 1], [39, 9], [30, 9]], '#a34c30');
+  });
+  spr.gy = 31;
+  return spr;
+}
+function paintHouse(pale) {
+  const wall = pale ? '#a3ac9e' : '#f3e6cc', wallD = pale ? '#7c8578' : '#d2bf9a';
+  const roof = pale ? '#6d776c' : '#d06a45', roofL = pale ? '#909a88' : '#f0a07a', roofD = pale ? '#465046' : '#a34c30';
+  const spr = bake(48, 50, g => {
+    poly(g, [[6, 26], [32, 26], [32, 46], [6, 46]], wall);
+    poly(g, [[32, 26], [42, 20], [42, 40], [32, 46]], wallD);
+    g.fillStyle = pale ? 'rgba(20,28,20,.35)' : 'rgba(110,70,40,.45)';
+    g.fillRect(6, 26, 26, 1.6); g.fillRect(6, 36, 26, 1.2); g.fillRect(18, 26, 1.4, 20);
+    g.fillStyle = pale ? '#1a1e1a' : '#6e4328'; g.fillRect(10, 34, 7, 12);
+    g.fillStyle = pale ? '#c6ff8a' : '#ffd27a'; g.fillRect(22, 31, 6, 5);
+    g.fillStyle = pale ? '#3c443c' : '#6e4328'; g.fillRect(24.6, 31, 0.9, 5); g.fillRect(22, 33.2, 6, 0.9);
+    poly(g, [[3, 28], [19, 8], [35, 28]], roof);
+    poly(g, [[19, 8], [44, 3 + 18], [35, 28]], roofD);
+    poly(g, [[3, 28], [19, 8], [13, 22]], roofL);
+    g.fillStyle = pale ? '#5e675e' : '#8f877c'; g.fillRect(34, 8, 4, 9);
+    if (pale) { disc(g, 19, 20, 2.6, '#e7ecdf'); disc(g, 18.2, 19.6, 0.55, '#1c2418'); disc(g, 19.8, 19.6, 0.55, '#1c2418'); }
+  });
+  spr.gy = 46;
+  spr.smoke = { dx: 12, dy: -42 };
+  return spr;
+}
+function paintFarm(pale) {
+  const spr = bake(64, 40, g => {
+    poly(g, [[4, 18], [50, 12], [60, 26], [12, 34]], pale ? '#7c8270' : '#a8784a');
+    for (let i = 0; i < 5; i++) {
+      const t = i / 4;
+      g.strokeStyle = pale ? '#5e6454' : '#7e5430'; g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(6 + t * 6, 19 + t * 14); g.lineTo(52 + t * 7, 13 + t * 12); g.stroke();
+      for (let k = 0; k < 6; k++) {
+        const x = 10 + t * 6 + k * 7.6, y = 18 + t * 13.5 - k * 0.95;
+        if (pale) { g.strokeStyle = '#8b9278'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 1, y - 3); g.stroke(); }
+        else { ell(g, x, y - 1.5, 2.4, 2, '#7eac52'); ell(g, x - 0.5, y - 2.4, 1.3, 1.1, '#a8d070'); }
+      }
+    }
+    g.fillStyle = pale ? '#4e5448' : '#6e4328';
+    for (const [x, y] of [[4, 18], [50, 12], [60, 26], [12, 34]]) g.fillRect(x - 1, y - 6, 2.2, 7);
+    g.strokeStyle = pale ? '#6a7064' : '#b07a45'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(4, 15); g.lineTo(50, 9); g.lineTo(60, 23); g.stroke();
+  });
+  spr.gy = 30;
+  return spr;
+}
+function paintScaffold() {
+  const spr = bake(44, 48, g => {
+    ell(g, 22, 44, 18, 4, 'rgba(120,90,50,.35)');
+    g.strokeStyle = '#8b5a32'; g.lineWidth = 2.2;
+    g.beginPath();
+    g.moveTo(6, 45); g.lineTo(6, 8); g.moveTo(38, 45); g.lineTo(38, 8); g.moveTo(22, 45); g.lineTo(22, 4);
+    g.moveTo(4, 30); g.lineTo(40, 30); g.moveTo(4, 16); g.lineTo(40, 16);
+    g.stroke();
+    g.strokeStyle = '#c4925a'; g.lineWidth = 1.3;
+    g.beginPath(); g.moveTo(6, 45); g.lineTo(22, 30); g.moveTo(22, 30); g.lineTo(38, 16); g.moveTo(38, 45); g.lineTo(22, 30); g.stroke();
+    g.fillStyle = '#d2a56c'; g.fillRect(3, 28.5, 38, 3); g.fillRect(3, 14.5, 38, 3);
+    ell(g, 31, 43, 6, 2.4, '#b9b0a2'); ell(g, 30, 41.6, 4, 1.6, '#d9d0c2');
+  });
+  spr.gy = 45;
+  return spr;
+}
+function paintCamp() {
+  const spr = bake(70, 44, g => {
+    poly(g, [[4, 38], [22, 8], [40, 38]], '#9a8a6e');
+    poly(g, [[22, 8], [40, 38], [30, 38]], '#776a52');
+    poly(g, [[17, 38], [22, 24], [27, 38]], '#3e3428');
+    g.strokeStyle = '#6b4630'; g.lineWidth = 1.4; g.beginPath(); g.moveTo(22, 8); g.lineTo(22, 3); g.stroke();
+    ell(g, 54, 37, 9, 3.4, '#8e8578');
+    g.strokeStyle = '#5c4030'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(47, 37); g.lineTo(60, 33); g.moveTo(48, 33); g.lineTo(61, 37); g.stroke();
+  });
+  spr.gy = 39;
+  spr.fire = { dx: 54 - 35, dy: -6 };
+  return spr;
+}
 function buildArt() {
   Art.shadow = paintShadow();
   Art.coin = paintCoin();
@@ -946,6 +1416,14 @@ function buildArt() {
   Art.shambler = [0, 1].map(paintShambler);
   Art.skeleton = [0, 1].map(paintSkeleton);
   Art.necro = [0, 1].map(paintNecro);
+  Art.folk = {};
+  for (const r of Object.keys(FOLK_STYLE)) Art.folk[r] = [0, 1].map(f => paintFolk(r, f));
+  Art.tool = { bow: paintToolIcon('bow'), hammer: paintToolIcon('hammer'), scythe: paintToolIcon('scythe') };
+  Art.stand = paintStand();
+  Art.house = paintHouse(false); Art.houseP = paintHouse(true);
+  Art.farm = paintFarm(false); Art.farmP = paintFarm(true);
+  Art.scaffold = paintScaffold();
+  Art.camp = paintCamp();
   Art.flame = paintRadial(18, 22, [[0, 'rgba(255,250,220,.95)'], [0.35, 'rgba(255,170,60,.9)'], [1, 'rgba(255,120,40,0)']]);
   Art.flameG = paintRadial(18, 22, [[0, 'rgba(236,255,220,.95)'], [0.35, 'rgba(150,230,90,.9)'], [1, 'rgba(80,160,50,0)']]);
   Art.orb = paintRadial(24, 24, [[0, 'rgba(230,255,210,1)'], [0.35, 'rgba(140,255,90,.85)'], [1, 'rgba(80,180,40,0)']]);
@@ -1286,13 +1764,36 @@ function buildingSpr(b) {
     return pale ? (wood ? Art.wallWP : Art.wallSP) : (wood ? Art.wallW : Art.wallS);
   }
   if (b.type === 'fort') return pale ? Art.fortP : Art.fort;
+  if (b.type === 'house') return pale ? Art.houseP : Art.house;
+  if (b.type === 'farm') return pale ? Art.farmP : Art.farm;
   return pale ? Art.towerP : Art.tower;
 }
+function drawScaffold(b) {
+  const spr = buildingSpr(b);
+  ctx.globalAlpha = 0.18 + 0.5 * b.built;
+  blit(spr, b.x, b.y, { sc: b.type === 'wall' ? 1.18 : 1 });
+  ctx.globalAlpha = 1;
+  const sc = b.type === 'farm' ? 0.75 : b.type === 'wall' ? 0.8 : 1;
+  shadow(b.x, b.y + 2, 16 * sc, 5);
+  blit(Art.scaffold, b.x, b.y + 2, { sc });
+  bar(b.x, b.y + 10, 40, b.built, '#8fd06a');
+  const busy = S.folk.some(f => f.role === 'builder' && f.job === b && f.working);
+  if (!S.folk.some(f => f.role === 'builder')) placeTag('Needs a Builder', b.x, b.y + 26, 11, '#ffe6b0', '#e6c27a');
+  else if (!busy) placeTag(NICE[b.type] + ' · waiting', b.x, b.y + 26, 11, '#fff6e4', null);
+}
 function drawBuilding(b) {
+  if (b.built < 1) return drawScaffold(b);
+  if (b.type === 'farm') {
+    const pale = b.owner === 'pale';
+    blit(pale ? Art.farmP : Art.farm, b.x, b.y + 6);
+    if (b.hp < b.max) bar(b.x, b.y + 12, 36, b.hp / b.max, pale ? '#7dce6a' : '#e2a23a');
+    if (!pale && !(b.farmer && S.folk.includes(b.farmer))) placeTag('Needs a Farmer', b.x, b.y + 22, 11, '#ffe6b0', '#e6c27a');
+    return;
+  }
   const spr = buildingSpr(b);
   const pale = b.owner === 'pale';
   const sc = b.type === 'wall' ? 1.18 : 1;
-  shadow(b.x, b.y + 2, (b.type === 'fort' ? 24 : b.type === 'wall' ? 16 : 14) * sc, (b.type === 'fort' ? 9 : 6) * sc);
+  shadow(b.x, b.y + 2, (b.type === 'fort' ? 24 : b.type === 'wall' || b.type === 'house' ? 17 : 14) * sc, (b.type === 'fort' ? 9 : 6) * sc);
   blit(spr, b.x, b.y, { sc });
   if (spr.flag) drawPennant(b.x + spr.flag.dx, b.y + spr.flag.dy, spr.flag.w, spr.flag.h, pale, b.x);
   if (spr.flames) for (const f of spr.flames) flameAt(b.x + f.dx, b.y + f.dy, pale, b.x);
@@ -1394,6 +1895,41 @@ function drawArcher(a) {
   shadow(a.x, a.y + 3, 8, 3.4);
   blit(Art.archer[mot.fr], a.x, a.y + 4, mot);
   flashAt(a.x, a.y - 8, 8, 10, a.flash);
+}
+function drawFolk(f) {
+  const mot = actorMotion(f);
+  shadow(f.x, f.y + 3, 8, 3.4);
+  const set = Art.folk[f.role] || Art.folk.villager;
+  let bob = mot.bob;
+  if (f.working && f.role === 'builder') bob += Math.abs(Math.sin(S.t * 9)) * -2;
+  blit(set[mot.fr], f.x, f.y + 4, { flip: mot.flip, bob });
+  if (f.working && f.role === 'builder' && ((S.t * 3) | 0) % 2 === 0 && Math.sin(S.t * 9) > 0.9) S.fx.push({ k: 'hit', x: f.x + (mot.flip ? -12 : 12), y: f.y - 6, t: 0.15, t0: 0.15 });
+  flashAt(f.x, f.y - 8, 8, 10, f.flash);
+}
+function drawStand(st) {
+  shadow(st.x, st.y + 2, 18, 5);
+  blit(Art.stand, st.x, st.y);
+  const ic = Art.tool[st.tool];
+  for (let i = 0; i < st.tools; i++) ctx.drawImage(ic.c, st.x - 15 + i * 10, st.y - 22, 12, 13.5);
+  const c = TOOL[st.tool].cost;
+  if (st.paid > 0) for (let i = 0; i < c; i++) {
+    ctx.globalAlpha = i < st.paid ? 1 : 0.3;
+    ctx.drawImage(Art.coin.c, st.x - (c * 9) / 2 + i * 9, st.y - 46, 9, 9);
+  }
+  ctx.globalAlpha = 1;
+  placeTag(TOOL[st.tool].label + ' ' + c, st.x, st.y + 14, 11, '#fff6e4', st.tools ? '#8ee0b0' : '#e6c27a');
+}
+function drawDrop(d) {
+  const s = 1 - Math.min(0.5, d.z / 80);
+  shadow(d.x, d.y + 1, 5 * s, 2.2 * s);
+  const spin = d.landed ? 1 : Math.abs(Math.cos(d.age * 18));
+  ctx.drawImage(Art.coin.c, d.x - 6 * spin, d.y - 12 - d.z, 12 * spin, 12);
+  if (d.landed && ((S.t * 2 + d.x) % 2) < 0.25) { ctx.fillStyle = 'rgba(255,250,220,.9)'; ctx.fillRect(d.x - 3, d.y - 9, 2, 2); }
+}
+function drawCamp(c) {
+  shadow(c.x, c.y + 2, 26, 7);
+  blit(Art.camp, c.x, c.y);
+  flameAt(c.x + Art.camp.fire.dx, c.y + Art.camp.fire.dy, false, c.x);
 }
 function drawGuardian(g) {
   const w = g.kind === 'warden';
@@ -1519,6 +2055,17 @@ function drawFxItem(f) {
     }
     ctx.globalAlpha = 1;
     if (f.n >= 10) placeTag('+' + f.n, f.x, f.y - 26 - u * 12, 12, '#ffd56a', '#e6c27a');
+  } else if (f.k === 'txt') {
+    ctx.globalAlpha = u < 0.7 ? 1 : (1 - u) / 0.3;
+    ctx.font = '900 17px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(28,20,14,.9)';
+    ctx.strokeText(f.txt, f.x, f.y - u * 26);
+    ctx.fillStyle = f.col; ctx.fillText(f.txt, f.x, f.y - u * 26);
+    ctx.globalAlpha = 1;
+  } else if (f.k === 'cfly') {
+    const x = f.x + (f.tx - f.x) * u, y = f.y + (f.ty - f.y) * u - Math.sin(u * Math.PI) * 26;
+    ctx.drawImage(Art.coin.c, x - 6, y - 12, 12, 12);
   } else if (f.k === 'burst') {
     const col = f.bad ? '186, 196, 170' : '240, 193, 74';
     const col2 = f.bad ? '120, 150, 110' : '70, 120, 200';
@@ -1551,7 +2098,7 @@ function gatherLights() {
     if (r.core && r.owner === 'player') lightList.push({ x: r.core.x, y: r.core.y - 8, r: r.core.keep ? 128 : 108, pale: false });
     else if (r.owner === 'pale') lightList.push({ x: r.x, y: r.y, r: 90, pale: true });
   }
-  for (const b of S.buildings) if (b.type !== 'wall') lightList.push({ x: b.x, y: b.y - 12, r: b.type === 'fort' ? 118 : 92, pale: b.owner === 'pale' });
+  for (const b of S.buildings) if (b.built >= 1 && b.type !== 'wall' && b.type !== 'farm') lightList.push({ x: b.x, y: b.y - 12, r: b.type === 'fort' ? 118 : 92, pale: b.owner === 'pale' });
   for (const u of S.undead) if (u.kind === 'necro') lightList.push({ x: u.x, y: u.y, r: 78, pale: true });
   return lightList;
 }
@@ -1675,10 +2222,14 @@ function render() {
   pileN = 0;
   for (const t of S.trees) if (vis(t.x, t.y)) pushP(t.y, 'tree', t);
   for (const rk of S.rocks) if (vis(rk.x, rk.y)) pushP(rk.y, 'rock', rk);
-  for (const b of S.buildings) if (vis(b.x, b.y)) pushP(b.y, 'bld', b);
+  for (const b of S.buildings) if (vis(b.x, b.y)) pushP(b.type === 'farm' && b.built >= 1 ? b.y - 30 : b.y, 'bld', b);
   for (const r of S.regions) if (r.core && vis(r.x, r.y)) pushP(r.core.y, 'core', r.core);
   for (const g of S.guardians) if (vis(g.x, g.y)) pushP(g.y, 'guard', g);
   for (const a of S.archers) if (vis(a.x, a.y)) pushP(a.y, 'arch', a);
+  for (const f of S.folk) if (vis(f.x, f.y)) pushP(f.y, 'folk', f);
+  for (const st of S.stands) if (vis(st.x, st.y)) pushP(st.y, 'stand', st);
+  for (const d of S.drops) if (vis(d.x, d.y)) pushP(d.y + 0.5, 'drop', d);
+  if (S.camp && vis(S.camp.x, S.camp.y)) pushP(S.camp.y, 'camp', S.camp);
   for (const u of S.undead) if (vis(u.x, u.y)) pushP(u.y, 'und', u);
   pushP(S.monarch.y, 'mon', S.monarch);
   for (let i = 1; i < pileN; i++) {
@@ -1695,6 +2246,10 @@ function render() {
     else if (it.k === 'guard') drawGuardian(it.a);
     else if (it.k === 'arch') drawArcher(it.a);
     else if (it.k === 'und') drawUndead(it.a);
+    else if (it.k === 'folk') drawFolk(it.a);
+    else if (it.k === 'stand') drawStand(it.a);
+    else if (it.k === 'drop') drawDrop(it.a);
+    else if (it.k === 'camp') drawCamp(it.a);
     else drawMonarch();
   }
 
@@ -1709,6 +2264,8 @@ function render() {
     if (!vis(g.x, g.y) || !edgeOf(g.x, g.y).on) continue;
     nameTag(g.name, g.x, g.y + g.r + 16, 13, g.kind === 'warden' ? '#d7f0cc' : '#ffd0c8', g.kind === 'warden' ? '#9ddea8' : '#e07a68');
   }
+  if (S.camp && vis(S.camp.x, S.camp.y)) placeTag('Vagrant camp', S.camp.x, S.camp.y + 18, 12, '#fff6e4', '#c9b488');
+  for (const a of S.archers) if (a.follow && vis(a.x, a.y)) { ctx.strokeStyle = 'rgba(240,193,74,.85)'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.ellipse(a.x, a.y + 3, 11, 4.5, 0, 0, Math.PI * 2); ctx.stroke(); }
 
   const m = S.monarch;
   if (m.target && m.target.hp > 0) {
@@ -1755,6 +2312,19 @@ function render() {
     const s = waveSpots[i];
     drawEdgeArrow(s.ex, s.ey, s.ang, s.necro ? '#c6ff8a' : '#f4ffe8');
   }
+  if (S.camp) {
+    const p = w2s(S.camp.x, S.camp.y);
+    if (!(p.x > 18 && p.x < vw - 18 && p.y > 100 && p.y < vh - 110)) {
+      const cx = vw / 2, cy = vh / 2, a = Math.atan2(p.y - cy, p.x - cx);
+      const ex = clamp(cx + Math.cos(a) * (vw * 0.5), 30, vw - 30), ey = clamp(cy + Math.sin(a) * (vh * 0.5), 140, vh - 150);
+      ctx.save(); ctx.translate(ex, ey);
+      ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fillStyle = 'rgba(28,20,14,.85)'; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = '#c9b488'; ctx.stroke();
+      ctx.drawImage(Art.folk.vagrant[0].c, -9, -12, 18, 20.4);
+      ctx.rotate(a); ctx.beginPath(); ctx.moveTo(24, 0); ctx.lineTo(16, -6); ctx.lineTo(16, 6); ctx.closePath(); ctx.fillStyle = '#c9b488'; ctx.fill();
+      ctx.restore();
+    }
+  }
   if (ptr && ptr.drag) {
     ctx.beginPath(); ctx.arc(ptr.sx, ptr.sy, 26, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(28,20,14,.16)'; ctx.fill();
@@ -1768,7 +2338,7 @@ function render() {
 }
 
 // ---------- HUD ----------
-const hud = { c: '', p: '', n: '', r: '', hp: -1, sk: '' };
+const hud = { c: '', p: '', n: '', r: '', hp: -1, sk: '', w: '', ra: '' };
 function setVal(id, key, v) {
   if (hud[key] === v) return;
   hud[key] = v;
@@ -1788,15 +2358,24 @@ function drawHud() {
     $('hpBar').style.width = (100 * hp / S.monarch.max) + '%';
     $('hpText').querySelector('.val').textContent = hp + ' / ' + S.monarch.max;
   }
-  const sk = S.phase === 'day' ? 'Night' : 'Day';
-  if (hud.sk !== sk) { hud.sk = sk; $('btnSkip').querySelector('.val').textContent = sk; }
+  const wk = workers(), cap = housingCap();
+  setVal('hWorkers', 'w', wk + '/' + cap);
+  $('hWorkers').classList.toggle('full', wk >= cap);
+  const ra = S.rally ? 'on' : 'off';
+  if (hud.ra !== ra) { hud.ra = ra; $('btnRally').querySelector('i').textContent = ra; }
+  if (DEBUG) {
+    const sk = S.phase === 'day' ? 'Night' : 'Day';
+    if (hud.sk !== sk) { hud.sk = sk; $('btnSkip').querySelector('.val').textContent = sk; }
+  }
 }
 
 let last = performance.now(), fps = 60;
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   fps = fps * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
-  update(dt); render(); drawHud();
+  const steps = Math.max(1, Math.min(40, (window.__bc && window.__bc.timeScale) | 0));
+  for (let i = 0; i < steps && !S.over; i++) update(dt);
+  render(); drawHud();
   requestAnimationFrame(frame);
 }
 
@@ -1807,6 +2386,7 @@ window.__bc = {
   coins(n) { S.coins += n; }, heal() { S.monarch.hp = S.monarch.max; },
   forceLose(id) { const r = S.regions[id]; if (r && r.core) damage(r.core, r.core.hp + 1); },
   guardianOf(id) { return S.guardians.find(g => g.region === id); },
+  timeScale: 1, TUNE, dropCoin, workers, housingCap, toggleRally, debug: DEBUG,
 };
 
 buildArt();
