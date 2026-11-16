@@ -21,7 +21,8 @@ const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const $ = id => document.getElementById(id);
 let dpr = 1, vw = 0, vh = 0, scale = 1;
 function resize() {
-  dpr = Math.min(window.devicePixelRatio || 1, 3);
+  // Backing store stops at 2x. A 3x phone buffer was the main fill-rate cost.
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
   vw = innerWidth; vh = innerHeight;
   cv.width = Math.round(vw * dpr); cv.height = Math.round(vh * dpr);
   cv.style.width = vw + 'px'; cv.style.height = vh + 'px';
@@ -80,6 +81,7 @@ function newGame() {
   buildDecor();
   bakeGround();
   $('over').hidden = true;
+  $('bar').hidden = false;
   setBuild(null);
   toast('Capture regions by beating their Guardians', '');
 }
@@ -291,6 +293,10 @@ function gameOver(why) {
   $('overTitle').textContent = why;
   $('overStats').innerHTML = `Nights survived: <b>${S.nights}</b><br>Regions held: <b>${owned().length}</b><br>Undead slain: <b>${S.kills}</b>`;
   $('over').hidden = false;
+  const box = $('toasts');
+  while (box.firstChild) box.firstChild.remove();
+  $('bar').hidden = true;
+  $('hint').textContent = '';
 }
 
 // ---------- update ----------
@@ -342,11 +348,11 @@ function update(dt) {
     if (b.owner === 'player') {
       let best = null, bd = spec.range;
       for (const u of S.undead) { const d = dist(u, b); if (d < bd) { bd = d; best = u; } }
-      if (best) { b.cd = spec.cd; S.stats.towerShots++; const ay = b.y - (b.type === 'fort' ? 40 : 30); S.fx.push({ k: 'arrow', x: b.x, y: ay, tx: best.x, ty: best.y, t: 0.26, t0: 0.26, c: '#ffd27a' }); damage(best, spec.dmg); }
+      if (best) { b.cd = spec.cd; S.stats.towerShots++; const ay = b.y - (b.type === 'fort' ? 40 : 30); S.fx.push({ k: 'arrow', x: b.x, y: ay, tx: best.x, ty: best.y, t: 0.48, t0: 0.48, c: '#ffd27a' }); damage(best, spec.dmg); }
     } else {
       let best = null, bd = spec.range;
       for (const a of [m].concat(S.archers)) { const d = dist(a, b); if (d < bd) { bd = d; best = a; } }
-      if (best) { b.cd = spec.cd * 1.4; S.stats.paleTowerShots++; const ay = b.y - (b.type === 'fort' ? 40 : 30); S.fx.push({ k: 'arrow', x: b.x, y: ay, tx: best.x, ty: best.y, t: 0.26, t0: 0.26, c: '#9dff7a' }); damage(best, 6); if (S.over) return; }
+      if (best) { b.cd = spec.cd * 1.4; S.stats.paleTowerShots++; const ay = b.y - (b.type === 'fort' ? 40 : 30); S.fx.push({ k: 'arrow', x: b.x, y: ay, tx: best.x, ty: best.y, t: 0.48, t0: 0.48, c: '#9dff7a' }); damage(best, 6); if (S.over) return; }
     }
   }
 
@@ -1187,6 +1193,27 @@ function tag(txt, x, y, size, col, accent) {
   ctx.fillStyle = col;
   ctx.fillText(txt, x, y + 0.5);
 }
+const TOP_CHROME = 104, BOT_CHROME = 116;
+function placeTag(txt, wx, wy, size, col, accent) {
+  const sh = (size + 8) * scale;
+  const p = w2s(wx, wy);
+  if (p.y - sh / 2 < TOP_CHROME || p.y + sh / 2 > vh - BOT_CHROME) return;
+  tag(txt, wx, wy, size, col, accent);
+}
+function nameTag(txt, x, y, size, col, accent) {
+  const m = S.monarch;
+  const dx = x - m.x, dy = y - m.y, d = Math.hypot(dx, dy), rad = 58;
+  let fade = 1;
+  if (d < rad) {
+    if (d < 0.5) x += rad;
+    else { x += dx / d * (rad - d); y += dy / d * (rad - d); }
+    if (Math.hypot(x - m.x, y - m.y) < 26) fade = 0.28;
+  }
+  ctx.save();
+  ctx.globalAlpha *= fade;
+  placeTag(txt, x, y, size, col, accent);
+  ctx.restore();
+}
 function drawFlag(x, y, fw, fh, flutter, color, skull) {
   const amp = flutter * 2.6;
   ctx.beginPath();
@@ -1290,7 +1317,7 @@ function drawBuilding(b) {
   }
   flashAt(b.x, b.y - 12, b.r * 0.7, b.r * 0.8, b.flash);
   if (b.hp < b.max) bar(b.x, b.y + 8, 36, b.hp / b.max, pale ? '#7dce6a' : '#e2a23a');
-  if (b.type === 'fort') tag('FORT', b.x, b.y + 18, 11, '#fff6e4', pale ? '#9ddea8' : '#e6c27a');
+  if (b.type === 'fort') placeTag('FORT', b.x, b.y + 18, 11, '#fff6e4', pale ? '#9ddea8' : '#e6c27a');
 }
 function drawCore(k) {
   const x = k.x, y = k.y, keep = !!k.keep;
@@ -1426,9 +1453,9 @@ function drawFxItem(f) {
     const ang = Math.atan2(f.ty - f.y, f.tx - f.x);
     const bx = f.x + (f.tx - f.x) * Math.max(0, u - 0.28), by = f.y + (f.ty - f.y) * Math.max(0, u - 0.28);
     ctx.save();
-    ctx.globalAlpha = 0.45;
-    ctx.strokeStyle = f.c || '#f4ead0';
-    ctx.lineWidth = f.bolt ? 3 : 1.5;
+    ctx.globalAlpha = f.bolt ? 0.6 : 0.85;
+    ctx.strokeStyle = f.c || '#fff1c2';
+    ctx.lineWidth = f.bolt ? 3.4 : 2.8;
     ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(x, y); ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.translate(x, y); ctx.rotate(ang);
@@ -1438,9 +1465,9 @@ function drawFxItem(f) {
       ctx.fillStyle = '#f4fff0';
       ctx.beginPath(); ctx.arc(-1, 0, 1.7, 0, Math.PI * 2); ctx.fill();
     } else {
-      ctx.strokeStyle = '#f7f0dc';
-      ctx.lineWidth = 1.7;
-      ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(3, 0); ctx.stroke();
+      ctx.strokeStyle = '#fff6e0';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(-11, 0); ctx.lineTo(4, 0); ctx.stroke();
       ctx.fillStyle = f.c || '#e8eef2';
       ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(2, -2.5); ctx.lineTo(2, 2.5); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#c4473a';
@@ -1491,7 +1518,7 @@ function drawFxItem(f) {
       ctx.drawImage(Art.coin.c, px - 5, py - 5, 10, 10);
     }
     ctx.globalAlpha = 1;
-    if (f.n >= 10) tag('+' + f.n, f.x, f.y - 26 - u * 12, 12, '#ffd56a', '#e6c27a');
+    if (f.n >= 10) placeTag('+' + f.n, f.x, f.y - 26 - u * 12, 12, '#ffd56a', '#e6c27a');
   } else if (f.k === 'burst') {
     const col = f.bad ? '186, 196, 170' : '240, 193, 74';
     const col2 = f.bad ? '120, 150, 110' : '70, 120, 200';
@@ -1515,55 +1542,108 @@ function drawFxItem(f) {
   }
 }
 
+const lightList = [];
+let lightKey = '';
 function gatherLights() {
-  const L = [];
-  L.push({ x: S.monarch.x, y: S.monarch.y, r: 168, pale: false });
+  lightList.length = 0;
+  lightList.push({ x: S.monarch.x, y: S.monarch.y, r: 168, pale: false });
   for (const r of S.regions) {
-    if (r.core && r.owner === 'player') L.push({ x: r.core.x, y: r.core.y - 8, r: r.core.keep ? 128 : 108, pale: false });
-    else if (r.owner === 'pale') L.push({ x: r.x, y: r.y, r: 90, pale: true });
+    if (r.core && r.owner === 'player') lightList.push({ x: r.core.x, y: r.core.y - 8, r: r.core.keep ? 128 : 108, pale: false });
+    else if (r.owner === 'pale') lightList.push({ x: r.x, y: r.y, r: 90, pale: true });
   }
-  for (const b of S.buildings) if (b.type !== 'wall') L.push({ x: b.x, y: b.y - 12, r: b.type === 'fort' ? 118 : 92, pale: b.owner === 'pale' });
-  for (const u of S.undead) if (u.kind === 'necro') L.push({ x: u.x, y: u.y, r: 78, pale: true });
-  return L;
+  for (const b of S.buildings) if (b.type !== 'wall') lightList.push({ x: b.x, y: b.y - 12, r: b.type === 'fort' ? 118 : 92, pale: b.owner === 'pale' });
+  for (const u of S.undead) if (u.kind === 'necro') lightList.push({ x: u.x, y: u.y, r: 78, pale: true });
+  return lightList;
 }
 function drawNight() {
   const k = S.nightK;
   if (k < 0.025) return;
-  const lw = Math.max(1, vw | 0), lh = Math.max(1, vh | 0);
+  const lw = Math.max(1, (vw * 0.5) | 0), lh = Math.max(1, (vh * 0.5) | 0);
   if (!lightCv || lightCv.width !== lw || lightCv.height !== lh) {
     lightCv = document.createElement('canvas');
     lightCv.width = lw; lightCv.height = lh;
     lightCtx = lightCv.getContext('2d');
+    lightKey = '';
   }
-  const g = lightCtx;
-  g.setTransform(1, 0, 0, 1, 0, 0);
-  g.globalCompositeOperation = 'source-over';
-  g.globalAlpha = 1;
-  g.clearRect(0, 0, lw, lh);
+  const lights = gatherLights();
+  const cam = camera();
+  const q = v => (v * 0.25) | 0;
+  let key = ((k * 16) | 0) + ':' + lw + ':' + q(cam.x) + ':' + q(cam.y);
+  for (let i = 0; i < lights.length; i++) key += ':' + q(lights[i].x) + ',' + q(lights[i].y) + (lights[i].pale ? 'p' : '');
+  if (key !== lightKey) {
+    lightKey = key;
+    const g = lightCtx;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = 1;
+    g.clearRect(0, 0, lw, lh);
     g.fillStyle = `rgba(22,18,74,${(0.64 * k).toFixed(3)})`;
     g.fillRect(0, 0, lw, lh);
-    const lights = gatherLights();
     g.globalCompositeOperation = 'destination-out';
     g.globalAlpha = Math.min(1, 0.45 + k * 0.4);
-  for (const L of lights) {
-    const p = w2s(L.x, L.y);
-    const flick = 0.95 + Math.sin(S.t * (L.pale ? 3 : 8) + L.x) * 0.05;
-    const rad = L.r * scale * flick;
-    g.drawImage(Art.light.c, p.x - rad, p.y - rad, rad * 2, rad * 2);
+    const inv = 0.5;
+    for (let i = 0; i < lights.length; i++) {
+      const L = lights[i];
+      const p = w2s(L.x, L.y);
+      const rad = L.r * scale * inv;
+      g.drawImage(Art.light.c, p.x * inv - rad, p.y * inv - rad, rad * 2, rad * 2);
+    }
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
   }
-  g.globalAlpha = 1;
-  g.globalCompositeOperation = 'source-over';
   ctx.drawImage(lightCv, 0, 0, vw, vh);
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  for (const L of lights) {
+  const lights2 = lightList;
+  for (let i = 0; i < lights2.length; i++) {
+    const L = lights2[i];
     const p = w2s(L.x, L.y);
     const rad = L.r * 0.42 * scale;
     ctx.globalAlpha = 0.2 * k;
-    const gl = L.pale ? Art.glowG.c : Art.glow.c;
-    ctx.drawImage(gl, p.x - rad, p.y - rad, rad * 2, rad * 2);
+    ctx.drawImage(L.pale ? Art.glowG.c : Art.glow.c, p.x - rad, p.y - rad, rad * 2, rad * 2);
   }
   ctx.restore();
+}
+function drawUndeadRims() {
+  const k = S.nightK;
+  if (k < 0.12) return;
+  const a = Math.min(1, k);
+  for (const u of S.undead) {
+    if (!vis(u.x, u.y)) continue;
+    const p = w2s(u.x, u.y - 10);
+    const big = u.kind === 'necro';
+    const rx = (big ? 18 : 13) * scale, ry = (big ? 24 : 16) * scale;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = big ? `rgba(186,255,150,${0.55 * a})` : `rgba(244,255,232,${0.62 * a})`;
+    ctx.fill();
+    ctx.strokeStyle = big ? `rgba(198,255,138,${0.95 * a})` : `rgba(240,255,226,${0.95 * a})`;
+    ctx.lineWidth = big ? 2.4 : 2;
+    ctx.stroke();
+    ctx.fillStyle = big ? '#d6ff8a' : '#f7fff2';
+    const eye = Math.max(1.7, 2.15 * scale);
+    const flip = u._flip ? -1 : 1;
+    ctx.beginPath(); ctx.arc(p.x + flip * rx * 0.2, p.y - ry * 0.12, eye, 0, 6.3); ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x + flip * rx * 0.46, p.y - ry * 0.06, eye, 0, 6.3); ctx.fill();
+  }
+}
+function drawEdgeArrow(ex, ey, ang, fill) {
+  ctx.save();
+  ctx.translate(ex, ey); ctx.rotate(ang);
+  ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-8, -9); ctx.lineTo(-3, 0); ctx.lineTo(-8, 9); ctx.closePath();
+  ctx.fillStyle = fill; ctx.fill();
+  ctx.lineWidth = 1.6; ctx.strokeStyle = '#fff6e4'; ctx.stroke();
+  ctx.restore();
+}
+function edgeOf(wx, wy) {
+  const p = w2s(wx, wy);
+  const on = p.x > 18 && p.x < vw - 18 && p.y > TOP_CHROME && p.y < vh - BOT_CHROME;
+  const cx = vw / 2, cy = vh / 2, ang = Math.atan2(p.y - cy, p.x - cx);
+  return {
+    on, ang,
+    ex: clamp(cx + Math.cos(ang) * (vw * 0.5), 26, vw - 26),
+    ey: clamp(cy + Math.sin(ang) * (vh * 0.5), TOP_CHROME + 14, vh - BOT_CHROME - 8),
+  };
 }
 
 function render() {
@@ -1575,6 +1655,7 @@ function render() {
   const c = camera();
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (vw / 2 - c.x * scale), dpr * (vh / 2 - c.y * scale));
   ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'low';
   ctx.drawImage(groundCv, 0, 0, W, H);
   ctx.drawImage(mapCv, 0, 0, W, H);
   for (const p of S.ponds) if (vis(p.x, p.y)) {
@@ -1620,11 +1701,14 @@ function render() {
   for (const r of S.regions) if (vis(r.x, r.y)) {
     const st = r.owner === 'player' ? 'YOURS' : r.owner === 'pale' ? 'PALE HOST' : (r.bonus === 'fort' ? 'WILD · fort' : r.bonus === 'keep' ? 'WILD · keep' : 'WILD');
     const lift = r.core && r.core.keep ? 108 : 86;
-    tag(r.name, r.x, r.y - lift, 18, '#fff8ee', null);
-    tag(st, r.x, r.y - lift + 24, 12, r.owner === 'player' ? '#d6e6ff' : r.owner === 'pale' ? '#d7f0cc' : '#ffe6b0', r.owner === 'player' ? '#7eb0ee' : r.owner === 'pale' ? '#9ddea8' : '#e6c27a');
-    if (r.core && r.core.keep) tag('KEEP', r.x, r.y + 22, 11, '#fff6e4', '#e6c27a');
+    placeTag(r.name, r.x, r.y - lift, 18, '#fff8ee', null);
+    placeTag(st, r.x, r.y - lift + 24, 12, r.owner === 'player' ? '#d6e6ff' : r.owner === 'pale' ? '#d7f0cc' : '#ffe6b0', r.owner === 'player' ? '#7eb0ee' : r.owner === 'pale' ? '#9ddea8' : '#e6c27a');
+    if (r.core && r.core.keep) placeTag('KEEP', r.x, r.y + 22, 11, '#fff6e4', '#e6c27a');
   }
-  for (const g of S.guardians) if (vis(g.x, g.y)) tag(g.name, g.x, g.y + g.r + 16, 13, g.kind === 'warden' ? '#d7f0cc' : '#ffd0c8', g.kind === 'warden' ? '#9ddea8' : '#e07a68');
+  for (const g of S.guardians) {
+    if (!vis(g.x, g.y) || !edgeOf(g.x, g.y).on) continue;
+    nameTag(g.name, g.x, g.y + g.r + 16, 13, g.kind === 'warden' ? '#d7f0cc' : '#ffd0c8', g.kind === 'warden' ? '#9ddea8' : '#e07a68');
+  }
 
   const m = S.monarch;
   if (m.target && m.target.hp > 0) {
@@ -1638,36 +1722,48 @@ function render() {
     ctx.setLineDash([]);
     ctx.restore();
   }
-  for (const f of S.fx) drawFxItem(f);
+  for (const f of S.fx) if (f.k !== 'arrow') drawFxItem(f);
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
   drawNight();
+  drawUndeadRims();
 
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (vw / 2 - c.x * scale), dpr * (vh / 2 - c.y * scale));
+  ctx.globalAlpha = 1;
+  for (const f of S.fx) if (f.k === 'arrow') drawFxItem(f);
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
   for (const g of S.guardians) {
-    const p = w2s(g.x, g.y);
-    if (p.x > 18 && p.x < vw - 18 && p.y > 100 && p.y < vh - 110) continue;
-    const cx = vw / 2, cy = vh / 2, a = Math.atan2(p.y - cy, p.x - cx);
-    const ex = clamp(cx + Math.cos(a) * (vw * 0.5), 26, vw - 26);
-    const ey = clamp(cy + Math.sin(a) * (vh * 0.5), 118, vh - 128);
-    ctx.save();
-    ctx.translate(ex, ey); ctx.rotate(a);
-    ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-8, -9); ctx.lineTo(-3, 0); ctx.lineTo(-8, 9); ctx.closePath();
-    ctx.fillStyle = g.kind === 'warden' ? '#9ddea8' : '#e15a4a';
-    ctx.fill();
-    ctx.lineWidth = 1.6; ctx.strokeStyle = '#fff6e4'; ctx.stroke();
-    ctx.restore();
+    const e = edgeOf(g.x, g.y);
+    if (e.on) continue;
+    drawEdgeArrow(e.ex, e.ey, e.ang, g.kind === 'warden' ? '#9ddea8' : '#e15a4a');
+  }
+  const waveSpots = [];
+  for (const u of S.undead) {
+    const e = edgeOf(u.x, u.y);
+    if (e.on) continue;
+    let near = null;
+    for (let i = 0; i < waveSpots.length; i++) if (Math.hypot(waveSpots[i].ex - e.ex, waveSpots[i].ey - e.ey) < 34) { near = waveSpots[i]; break; }
+    if (near) { if (u.kind === 'necro') near.necro = true; }
+    else waveSpots.push({ ex: e.ex, ey: e.ey, ang: e.ang, necro: u.kind === 'necro' });
+  }
+  for (let i = 0; i < waveSpots.length; i++) {
+    const s = waveSpots[i];
+    drawEdgeArrow(s.ex, s.ey, s.ang, s.necro ? '#c6ff8a' : '#f4ffe8');
   }
   if (ptr && ptr.drag) {
-    ctx.beginPath(); ctx.arc(ptr.sx, ptr.sy, 58, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(28,20,14,.38)'; ctx.fill();
-    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,236,200,.8)'; ctx.stroke();
-    const dx = ptr.x - ptr.sx, dy = ptr.y - ptr.sy, len = Math.hypot(dx, dy) || 1, k = Math.min(1, 46 / len);
-    const kx = ptr.sx + dx * k, ky = ptr.sy + dy * k;
-    ctx.beginPath(); ctx.arc(kx, ky, 20, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(240,193,74,.95)'; ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = '#2a1c10'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(ptr.sx, ptr.sy, 26, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(28,20,14,.16)'; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,236,200,.32)'; ctx.stroke();
+    const dx = ptr.x - ptr.sx, dy = ptr.y - ptr.sy, len = Math.hypot(dx, dy) || 1, kk = Math.min(1, 18 / len);
+    const kx = ptr.sx + dx * kk, ky = ptr.sy + dy * kk;
+    ctx.beginPath(); ctx.arc(kx, ky, 7, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(240,193,74,.38)'; ctx.fill();
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(42,28,16,.4)'; ctx.stroke();
   }
 }
 
