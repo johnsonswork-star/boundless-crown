@@ -8,7 +8,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>Boundless Crown — prototype</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23241910'/%3E%3Cpath fill='%23f0c14a' d='M3 12.2 4.2 6.2 8 9.1 11.8 6.2 13 12.2z'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
@@ -62,6 +62,16 @@
     <path d="M12 6.4v5.6M9.6 8.2c.6-.7 4.2-.7 4.8 0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
     <path d="M8.2 16.2 12 21l3.8-4.8" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
   </symbol>
+  <symbol id="i-scythe" viewBox="0 0 24 24">
+    <path d="M8.2 21.2 12.2 7.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M12.2 7.2c.4-3.4 6.8-4.2 8.6.4-3.6-.4-6.2 1.2-7.2 3.4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M7.2 21.2h3.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-gate" viewBox="0 0 24 24">
+    <path d="M4 21V10.2C4 6.2 7.4 3.4 12 3.4S20 6.2 20 10.2V21" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M4 21h16M12 21V10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M9.4 14.2h.2M14.4 14.2h.2" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+  </symbol>
   <symbol id="i-skip" viewBox="0 0 24 24">
     <path fill="currentColor" d="M4 5.5 12.2 12 4 18.5V5.5zm8.2 0L20.4 12l-8.2 6.5V5.5z"/>
   </symbol>
@@ -84,9 +94,13 @@
 <div id="hint"></div>
 <div id="buildMenu" hidden>
   <button data-act="wall" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-wall"/></svg><b>Wall</b><i><svg class="ico" viewBox="0 0 24 24"><use href="#i-coin"/></svg>4</i></button>
+  <button data-act="gate" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-gate"/></svg><b>Gate</b><i><svg class="ico" viewBox="0 0 24 24"><use href="#i-coin"/></svg>6</i></button>
   <button data-act="tower" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-tower"/></svg><b>Tower</b><i><svg class="ico" viewBox="0 0 24 24"><use href="#i-coin"/></svg>12</i></button>
   <button data-act="farm" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-farm"/></svg><b>Farm</b><i><svg class="ico" viewBox="0 0 24 24"><use href="#i-coin"/></svg>8</i></button>
   <button data-act="house" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-house"/></svg><b>House</b><i><svg class="ico" viewBox="0 0 24 24"><use href="#i-coin"/></svg>6</i></button>
+  <button data-act="hammer" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-hammer"/></svg><b>Hammer</b><i><svg class="ico" viewBox="0 0 24 24"><use href="#i-coin"/></svg>3</i></button>
+  <button data-act="bow" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-bow"/></svg><b>Bow</b><i><svg class="ico" viewBox="0 0 24 24"><use href="#i-coin"/></svg>5</i></button>
+  <button data-act="scythe" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-scythe"/></svg><b>Scythe</b><i><svg class="ico" viewBox="0 0 24 24"><use href="#i-coin"/></svg>5</i></button>
   <button data-act="close" type="button" class="close" aria-label="Close"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
 </div>
 <div id="bar">
@@ -101,6 +115,6 @@
     <button id="btnRestart" type="button">Restart</button>
   </div>
 </div>
-<script src="game.js?v=5"></script>
+<script src="game.js?v=6"></script>
 </body>
 </html>

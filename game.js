@@ -5,7 +5,7 @@
 const W = 2400, H = 2400, CX = W / 2, CY = H / 2;
 const DAY = 60, NIGHT = 45, CELL = 8, GW = W / CELL, GH = H / CELL;
 const COST = { wall: 4, tower: 12, farm: 8, house: 6 };
-const NICE = { wall: 'Wall', tower: 'Tower', farm: 'Farm', house: 'House', fort: 'Fort' };
+const NICE = { wall: 'Wall', tower: 'Tower', farm: 'Farm', house: 'House', fort: 'Fort', gate: 'Gate', bow: 'Bow stand', hammer: 'Hammer stand', scythe: 'Scythe stand' };
 const TOOL = {
   bow:    { cost: 4, role: 'archer',  label: 'Bow' },
   hammer: { cost: 3, role: 'builder', label: 'Hammer' },
@@ -16,8 +16,11 @@ const TUNE = {
   startCoins: 12, keepSlots: 1, houseSlots: 2, startHouses: 1, startBuilders: 1,
   trickleEvery: 10,              // +1 coin per owned region every N s by day (small passive)
   dropRange: 64, pickupGrace: 0.6, standMax: 3,
+  standCost: { bow: 5, hammer: 3, scythe: 5 }, // Build-menu price; Hammer is cheap so you can get going
+  gateCost: 6, wallSpacing: 34,
+  zoomMin: 0.55, zoomMax: 2.4, zoomStart: 1,
   vagrantEvery: 18, vagrantMax: 4, vagrantStart: 2,
-  buildTime: { wall: 4, tower: 8, farm: 5, house: 6 }, repairRate: 14,
+  buildTime: { wall: 4, tower: 8, farm: 5, house: 6, bow: 5, hammer: 4, scythe: 5, gate: 5 }, repairRate: 14,
   farmEvery: 5, farmCoins: 1,    // a worked farm pays farmCoins every farmEvery s, by day
   coreHome: 280, coreCaptured: 150, coreRetaken: 130, coreKeep: 320,
   waveBase: 2, wavePerNight: 7, wavePerRegion: 2,
@@ -37,24 +40,39 @@ const BLD = {
   fort:  { hp: 260, r: 22, range: 220, cd: 0.8, dmg: 13 },
   farm:  { hp: 70, r: 24 },
   house: { hp: 130, r: 18 },
+  bow:    { hp: 90, r: 16 },
+  hammer: { hp: 90, r: 16 },
+  scythe: { hp: 90, r: 16 },
+  gate:   { hp: 140, r: 16 },
 };
+Object.assign(COST, TUNE.standCost);
+COST.gate = TUNE.gateCost;
 
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const $ = id => document.getElementById(id);
-let dpr = 1, vw = 0, vh = 0, scale = 1;
+let dpr = 1, vw = 0, vh = 0, baseScale = 1, zoom = TUNE.zoomStart, scale = 1;
+let lookX = null, lookY = null, pinch = null;
+const pts = new Map();
+function applyScale() {
+  const zMin = TUNE.zoomMin, zMax = TUNE.zoomMax;
+  zoom = zoom < zMin ? zMin : zoom > zMax ? zMax : zoom;
+  scale = baseScale * zoom;
+}
 function resize() {
   // Backing store stops at 2x. A 3x phone buffer was the main fill-rate cost.
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   vw = innerWidth; vh = innerHeight;
   cv.width = Math.round(vw * dpr); cv.height = Math.round(vh * dpr);
   cv.style.width = vw + 'px'; cv.style.height = vh + 'px';
-  scale = Math.max(0.55, Math.min(1.3, vw / 560));
+  baseScale = Math.max(0.55, Math.min(1.3, vw / 560));
+  applyScale();
 }
-addEventListener('resize', resize); resize();
+addEventListener('resize', resize);
 
 function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+resize();
 
 let S = null, grid = null, mapCv = document.createElement('canvas');
 mapCv.width = GW; mapCv.height = GH;
@@ -109,7 +127,10 @@ function newGame() {
   $('bar').hidden = false;
   setBuild(null); showMenu(false);
   $('btnRally').classList.remove('sel');
-  toast('Drop coins on vagrants and tool stands to grow your kingdom', '');
+  zoom = TUNE.zoomStart; applyScale();
+  lookX = S.monarch.x; lookY = S.monarch.y;
+  pinch = null; wallDrag = null; pts.clear(); ptr = null;
+  toast('Start with your Builder and House. Order a Hammer stand, then drop coins on vagrants and stands', '');
 }
 function mkBld(type, x, y, rid, built) {
   const spec = BLD[type];
@@ -121,7 +142,7 @@ function mkFolk(role, x, y) {
 function setupHome() {
   const h = S.regions[0];
   for (let i = 0; i < TUNE.startHouses; i++) S.buildings.push(mkBld('house', h.x + 100 + i * 46, h.y - 24, 0, 1));
-  S.stands = [['bow', -72], ['hammer', 0], ['scythe', 72]].map(([tool, dx]) => ({ tool, x: h.x + dx, y: h.y + 110, r: 14, paid: 0, tools: 0 }));
+  S.stands = [];
   for (let i = 0; i < TUNE.startBuilders; i++) S.folk.push(mkFolk('builder', h.x - 46 + i * 18, h.y + 50));
   // vagrant camp: just inside the nearest wild region, as far from its guardian as possible
   const wild = S.regions.filter(r => r.id !== 0).sort((a, b) => dist(a, h) - dist(b, h))[0];
@@ -151,25 +172,72 @@ function toast(msg, cls) {
 }
 
 // ---------- input ----------
-let ptr = null; const keys = {};
+let ptr = null, wallDrag = null, pinched = false; const keys = {};
+function startPinch() {
+  const arr = [...pts.values()];
+  if (arr.length < 2) return;
+  const d = Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y) || 1;
+  pinch = { d0: d, z0: zoom };
+  pinched = true;
+  ptr = null;
+  wallDrag = null; // pinch wins; do not place the wall line
+}
+function onWheelZoom(e) {
+  e.preventDefault();
+  if (!S || S.over) return;
+  const factor = Math.pow(0.999, e.deltaY);
+  setZoomAt(zoom * factor, e.clientX, e.clientY);
+}
+cv.addEventListener('wheel', onWheelZoom, { passive: false });
 cv.addEventListener('pointerdown', e => {
-  e.preventDefault(); if (ptr) return;
-  ptr = { id: e.pointerId, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, drag: false, t: performance.now() };
+  e.preventDefault();
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
   try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+  if (pts.size >= 2) { startPinch(); return; }
+  if (pinch || pinched) return;
+  ptr = { id: e.pointerId, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, drag: false, t: performance.now(), build: !!(S && S.build) };
+  if (S && !S.over && S.build === 'wall') {
+    const w = s2w(e.clientX, e.clientY);
+    wallDrag = { x0: w.x, y0: w.y, x1: w.x, y1: w.y };
+    ptr.wall = true;
+  }
 });
 cv.addEventListener('pointermove', e => {
+  if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && pts.size >= 2) {
+    const arr = [...pts.values()];
+    const d = Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y) || 1;
+    const mx = (arr[0].x + arr[1].x) / 2, my = (arr[0].y + arr[1].y) / 2;
+    setZoomAt(pinch.z0 * (d / pinch.d0), mx, my);
+    return;
+  }
   if (!ptr || e.pointerId !== ptr.id) return;
   ptr.x = e.clientX; ptr.y = e.clientY;
   if (Math.hypot(ptr.x - ptr.sx, ptr.y - ptr.sy) > 14) ptr.drag = true;
+  if (wallDrag && ptr.wall) {
+    const w = s2w(ptr.x, ptr.y);
+    wallDrag.x1 = w.x; wallDrag.y1 = w.y;
+  }
 });
 const endPtr = e => {
+  pts.delete(e.pointerId);
+  if (pinch) {
+    if (pts.size < 2) pinch = null;
+    if (ptr && ptr.id === e.pointerId) ptr = null;
+    if (pts.size === 0) pinched = false;
+    return;
+  }
+  if (pts.size === 0) pinched = false;
   if (!ptr || e.pointerId !== ptr.id) return;
-  if (!ptr.drag && performance.now() - ptr.t < 600 && e.type === 'pointerup') onTap(ptr.x, ptr.y);
+  if (wallDrag && ptr.wall && e.type === 'pointerup') commitWallLine(planWallLine(wallDrag.x0, wallDrag.y0, wallDrag.x1, wallDrag.y1));
+  else if (!ptr.drag && !ptr.wall && performance.now() - ptr.t < 600 && e.type === 'pointerup') onTap(ptr.x, ptr.y);
+  wallDrag = null;
   ptr = null;
 };
 cv.addEventListener('pointerup', endPtr); cv.addEventListener('pointercancel', endPtr);
 addEventListener('keydown', e => {
   keys[e.key.toLowerCase()] = true;
+  if (e.key === 'Escape' && S && S.build) { e.preventDefault(); setBuild(null); }
   if (e.key === 'n' && DEBUG) skipPhase();
   if (e.key === ' ' && !e.repeat) dropCoin();
 });
@@ -206,12 +274,32 @@ $('btnRestart').addEventListener('click', () => newGame());
 
 function setBuild(t) {
   if (!S) return;
+  wallDrag = null;
   S.build = t; S.mapDirty = true;
   const bb = $('btnBuild');
   bb.classList.toggle('sel', !!t);
   bb.querySelector('b').textContent = t ? 'Cancel' : 'Build';
   bb.querySelector('i').textContent = t ? NICE[t] : 'menu';
-  $('hint').textContent = t ? `Tap your land to order a ${NICE[t]} · ${COST[t]} coins` : '';
+  if (!t) $('hint').textContent = '';
+  else if (t === 'wall') $('hint').textContent = `Drag to lay a Wall · ${COST.wall} coins each · Cancel to stop`;
+  else if (t === 'gate') $('hint').textContent = `Tap to place a Gate, or tap a Wall to swap · ${COST.gate} coins`;
+  else $('hint').textContent = `Tap your land to order a ${NICE[t]} · ${COST[t]} coins`;
+}
+function isStandType(t) { return !!TOOL[t]; }
+function setZoomAt(z, sx, sy) {
+  const before = s2w(sx, sy);
+  zoom = z;
+  applyScale();
+  lookX = before.x - (sx - vw / 2) / scale;
+  lookY = before.y - (sy - vh / 2) / scale;
+}
+function followCam(dt) {
+  if (!S || pinch) return;
+  const m = S.monarch;
+  if (lookX == null) { lookX = m.x; lookY = m.y; return; }
+  const k = Math.min(1, 6 * dt);
+  lookX += (m.x - lookX) * k;
+  lookY += (m.y - lookY) * k;
 }
 function showMenu(on) {
   $('buildMenu').hidden = !on;
@@ -229,8 +317,9 @@ function toggleRally() {
 }
 
 function camera() {
-  const m = S.monarch, hw = vw / 2 / scale, hh = vh / 2 / scale;
-  return { x: clamp(m.x, Math.min(hw, CX), Math.max(W - hw, CX)), y: clamp(m.y, Math.min(hh, CY), Math.max(H - hh, CY)) };
+  const tx = lookX != null ? lookX : S.monarch.x, ty = lookY != null ? lookY : S.monarch.y;
+  const hw = vw / 2 / scale, hh = vh / 2 / scale;
+  return { x: clamp(tx, Math.min(hw, CX), Math.max(W - hw, CX)), y: clamp(ty, Math.min(hh, CY), Math.max(H - hh, CY)) };
 }
 function s2w(sx, sy) { const c = camera(); return { x: c.x + (sx - vw / 2) / scale, y: c.y + (sy - vh / 2) / scale }; }
 function w2s(wx, wy) { const c = camera(); return { x: (wx - c.x) * scale + vw / 2, y: (wy - c.y) * scale + vh / 2 }; }
@@ -245,22 +334,99 @@ function onTap(sx, sy) {
   if (best) { S.monarch.target = best; if (dist(best, S.monarch) > 90) toast('Target set — move closer to strike'); }
 }
 
-function tryPlace(type, x, y) {
+function placeBlocked(type, x, y, extra) {
+  if (x < 20 || y < 20 || x > W - 20 || y > H - 20) return 'Out of bounds';
   const rid = regionIdAt(x, y), r = S.regions[rid];
-  if (r.owner !== 'player') return toast('You can only build in captured land', 'bad');
-  if (x < 20 || y < 20 || x > W - 20 || y > H - 20) return;
-  if (S.coins < COST[type]) return toast(`Need ${COST[type]} coins`, 'bad');
-  if (r.core && dist(r.core, { x, y }) < 40) return toast('Too close to the banner', 'bad');
+  if (!r || r.owner !== 'player') return 'You can only build in captured land';
+  if (r.core && dist(r.core, { x, y }) < 40) return 'Too close to the banner';
   const rr = BLD[type].r;
-  for (const b of S.buildings) if (dist(b, { x, y }) < b.r + rr + 2) return toast('Spot taken', 'bad');
-  for (const s of S.stands) if (dist(s, { x, y }) < rr + 22) return toast('Too close to a tool stand', 'bad');
+  const ignore = extra && extra.ignore;
+  for (const b of S.buildings) {
+    if (b === ignore) continue;
+    if (dist(b, { x, y }) < b.r + rr + 2) return 'Spot taken';
+  }
+  for (const s of S.stands) {
+    if (s === ignore || S.buildings.includes(s)) continue;
+    if (dist(s, { x, y }) < rr + 22) return 'Too close to a tool stand';
+  }
+  if (extra && extra.others) {
+    for (const o of extra.others) if (dist(o, { x, y }) < rr + (o.r || rr) + 2) return 'Spot taken';
+  }
+  if (isStandType(type) && S.stands.some(st => st.tool === type && st.region === rid && st.owner === 'player')) return 'This land already has a ' + NICE[type];
+  return null;
+}
+function swapWallForGate(wall) {
+  const fee = Math.max(0, TUNE.gateCost - COST.wall);
+  if (S.coins < fee) return toast(fee ? `Need ${fee} coins to swap in a Gate` : 'Cannot swap', 'bad');
+  if (fee) { S.coins -= fee; floatTxt(wall.x, wall.y - 30, '-' + fee, '#ffb0a0'); }
+  wall.type = 'gate';
+  const ratio = wall.max ? wall.hp / wall.max : 1;
+  wall.max = BLD.gate.hp; wall.r = BLD.gate.r;
+  wall.hp = Math.max(1, Math.ceil(wall.max * (wall.built >= 1 ? ratio : Math.max(0.15, wall.built || 0))));
+  toast(wall.built >= 1 ? 'Wall swapped for a Gate' : 'Wall order swapped for a Gate', 'good');
+  return wall;
+}
+function placeBld(type, x, y) {
+  const rid = regionIdAt(x, y);
   S.coins -= COST[type];
   const b = mkBld(type, x, y, rid, 0);
+  if (isStandType(type)) { b.tool = type; b.paid = 0; b.tools = 0; S.stands.push(b); }
   S.buildings.push(b);
   floatTxt(x, y - 30, '-' + COST[type], '#ffb0a0');
+  return b;
+}
+function tryPlace(type, x, y) {
+  if (type === 'gate') {
+    const hit = S.buildings.find(b => b.type === 'wall' && b.owner === 'player' && dist(b, { x, y }) < (b.r || 16) + 14);
+    if (hit) return swapWallForGate(hit);
+  }
+  const why = placeBlocked(type, x, y);
+  if (why) return toast(why, 'bad');
+  if (S.coins < COST[type]) return toast(`Need ${COST[type]} coins`, 'bad');
+  const b = placeBld(type, x, y);
   const nb = S.folk.filter(f => f.role === 'builder').length;
   toast(nb ? `${NICE[type]} ordered — a Builder is on the way` : `${NICE[type]} ordered — buy a hammer to get a Builder`, nb ? '' : 'bad');
   return b;
+}
+function planWallLine(x0, y0, x1, y1) {
+  const sp = TUNE.wallSpacing, dx = x1 - x0, dy = y1 - y0, d = Math.hypot(dx, dy);
+  const steps = d < sp * 0.45 ? 0 : Math.max(1, Math.round(d / sp));
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = steps ? i / steps : 0;
+    pts.push({ x: x0 + dx * t, y: y0 + dy * t });
+  }
+  const planned = [], others = [];
+  let paid = 0;
+  for (const pt of pts) {
+    const why = placeBlocked('wall', pt.x, pt.y, { others });
+    const afford = !why && S.coins >= paid + COST.wall;
+    const ok = !why && afford;
+    planned.push({ x: pt.x, y: pt.y, ok, why: why || (afford ? null : 'Need more coins') });
+    if (ok) { others.push({ x: pt.x, y: pt.y, r: BLD.wall.r }); paid += COST.wall; }
+  }
+  return planned;
+}
+function commitWallLine(plan) {
+  if (!S || S.over) return 0;
+  const ok = (plan || []).filter(pt => pt.ok);
+  if (!ok.length) {
+    const why = (plan && plan[0] && plan[0].why) || 'Cannot place wall here';
+    toast(why, 'bad');
+    return 0;
+  }
+  let n = 0;
+  for (const pt of ok) {
+    if (S.coins < COST.wall) break;
+    if (placeBld('wall', pt.x, pt.y)) n++;
+  }
+  if (n) {
+    const nb = S.folk.filter(f => f.role === 'builder').length;
+    toast(nb
+      ? (n === 1 ? 'Wall ordered — a Builder is on the way' : n + ' walls ordered — Builders will raise them')
+      : 'Walls ordered — buy a hammer to get a Builder', nb ? '' : 'bad');
+  }
+  return n;
 }
 
 // ---------- coin economy (Kingdom-style coin drops) ----------
@@ -282,7 +448,7 @@ function dropCoin() {
 }
 function claimTarget(d) {
   let best = null, bd = TUNE.dropRange;
-  if (S.regions[0].owner === 'player') for (const st of S.stands) if (st.tools < TUNE.standMax) { const dd = dist(st, d); if (dd < bd) { bd = dd; best = st; } }
+  if (S.regions[0].owner === 'player') for (const st of S.stands) if (st.owner === 'player' && st.built >= 1 && st.tools < TUNE.standMax) { const dd = dist(st, d); if (dd < bd) { bd = dd; best = st; } }
   const free = workers() < housingCap();
   d.noHouse = false;
   for (const f of S.folk) if (f.role === 'vagrant') {
@@ -337,7 +503,10 @@ function homeCore() {
 function moveTo(f, tx, ty, sp, dt) {
   const d = Math.hypot(tx - f.x, ty - f.y);
   if (d < 1.5) return true;
-  const s = Math.min(d, sp * dt); f.x += (tx - f.x) / d * s; f.y += (ty - f.y) / d * s;
+  const s = Math.min(d, sp * dt);
+  const nx = f.x + (tx - f.x) / d * s, ny = f.y + (ty - f.y) / d * s;
+  if (f.role === 'vagrant') { f.x = nx; f.y = ny; }
+  else tryMove(f, nx, ny, true);
   return d < 6;
 }
 function wanderAround(f, cx, cy, rad, dt, sp) {
@@ -366,6 +535,8 @@ function onBuilt(b) {
   floatTxt(b.x, b.y - 40, NICE[b.type] + ' built', '#d6ffb0');
   if (b.type === 'house') toast(`House built — +${TUNE.houseSlots} worker slots`, 'good');
   else if (b.type === 'farm') toast('Farm built — a Farmer can work it for coins', 'good');
+  else if (b.tool) toast(NICE[b.tool] + ' built — drop coins to stock tools', 'good');
+  else if (b.type === 'gate') toast('Gate built — your people can pass, the Pale Host cannot', 'good');
 }
 function becomeRole(f, role) {
   S.stats.roles++;
@@ -393,7 +564,7 @@ function updateFolk(dt) {
         f.stand = null;
         for (const s of S.stands) if (s.tools > S.folk.filter(o => o.stand === s).length) { st = s; f.stand = s; break; }
       }
-      if (st) { if (moveTo(f, st.x, st.y + 8, sp, dt)) { st.tools--; f.stand = null; becomeRole(f, TOOL[st.tool].role); } continue; }
+      if (st) { if (moveTo(f, st.x, st.y + (st.r || 14) + 6, sp, dt)) { st.tools--; f.stand = null; becomeRole(f, TOOL[st.tool].role); } continue; }
       if (f.state === 'home') { if (Math.hypot(f.x - ix, f.y - iy) > 50) { moveTo(f, ix, iy, sp, dt); continue; } f.state = 'idle'; }
       wanderAround(f, ix, iy, 64, dt, sp); continue;
     }
@@ -452,7 +623,7 @@ function updateFolk(dt) {
 function assignPosts() {
   const towers = [], cores = [], walls = [];
   for (const b of S.buildings) if (b.owner === 'player' && b.built >= 1) {
-    if (b.type === 'tower' || b.type === 'fort') towers.push(b); else if (b.type === 'wall') walls.push(b);
+    if (b.type === 'tower' || b.type === 'fort') towers.push(b); else if (b.type === 'wall' || b.type === 'gate') walls.push(b);
   }
   for (const r of owned()) if (r.core) cores.push(r.core);
   const posts = towers.concat(cores, walls);
@@ -541,8 +712,12 @@ function damage(e, dmg) {
   } else if (e.type === 'core') {
     loseRegion(S.regions[e.region]);
   } else if (BLD[e.type] && S.buildings.includes(e)) {
-    S.buildings.splice(S.buildings.indexOf(e), 1); S.fx.push({ k: 'puff', x: e.x, y: e.y, t: 0.6, t0: 0.6 });
+    S.buildings.splice(S.buildings.indexOf(e), 1);
+    const si = S.stands.indexOf(e); if (si >= 0) S.stands.splice(si, 1);
+    S.fx.push({ k: 'puff', x: e.x, y: e.y, t: 0.6, t0: 0.6 });
     if (e.type === 'house' && e.owner === 'player') toast('A House was destroyed — housing reduced', 'bad');
+    else if (e.tool && e.owner === 'player') toast('A tool stand was destroyed', 'bad');
+    else if (e.type === 'gate' && e.owner === 'player') toast('A Gate was destroyed', 'bad');
   } else if (e.type === 'archer') {
     S.archers.splice(S.archers.indexOf(e), 1); S.stats.folkLost++;
   } else if (e.type === 'folk') {
@@ -569,6 +744,7 @@ function loseRegion(r) {
   r.owner = 'pale'; r.core = null; S.mapDirty = true; S.stats.losses++;
   S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05, bad: 1 });
   S.buildings = S.buildings.filter(b => !(b.region === r.id && b.built < 1)); // unfinished scaffolds collapse
+  S.stands = S.stands.filter(st => S.buildings.includes(st) || st.region !== r.id);
   for (const b of S.buildings) if (b.region === r.id) { b.owner = 'pale'; b.hp = Math.max(b.hp, b.max * 0.5); if (b.farmer) b.farmer = null; }
   for (const a of S.archers.slice()) if (regionIdAt(a.x, a.y) === r.id && dist(a, S.monarch) > 300) S.archers.splice(S.archers.indexOf(a), 1);
   const hp = r.weakened ? 220 : 360;
@@ -596,8 +772,29 @@ function gameOver(why) {
 }
 
 // ---------- update ----------
+function blocksFriend(b) {
+  if (!b || b.owner !== 'player' || b.built < 1) return false;
+  if (b.type === 'farm' || b.type === 'gate' || b.tool || isStandType(b.type)) return false;
+  return true;
+}
+function solidAt(x, y, r, friend) {
+  for (const b of S.buildings) {
+    if (friend && !blocksFriend(b)) continue;
+    if (!friend && (b.owner !== 'player' || b.built < 1 || b.type === 'farm')) continue;
+    if (Math.hypot(b.x - x, b.y - y) < b.r + r) return b;
+  }
+  return null;
+}
+function tryMove(e, nx, ny, friend) {
+  nx = clamp(nx, 10, W - 10); ny = clamp(ny, 10, H - 10);
+  if (!solidAt(nx, ny, e.r, friend) || solidAt(e.x, e.y, e.r, friend)) { e.x = nx; e.y = ny; return true; }
+  if (!solidAt(nx, e.y, e.r, friend)) { e.x = nx; return true; }
+  if (!solidAt(e.x, ny, e.r, friend)) { e.y = ny; return true; }
+  return false;
+}
 function update(dt) {
   if (S.over) return;
+  followCam(dt);
   S.t += dt; S.phaseT -= dt;
   if (S.phaseT <= 0) { if (S.phase === 'day') startNight(); else startDay(); }
   if (S.phase === 'day') { S.trickle += dt; if (S.trickle >= TUNE.trickleEvery) { S.trickle -= TUNE.trickleEvery; S.coins += owned().length; } }
@@ -606,13 +803,13 @@ function update(dt) {
   const m = S.monarch;
   // movement
   let dx = 0, dy = 0;
-  if (ptr && ptr.drag) { dx = (ptr.x - ptr.sx) / 60; dy = (ptr.y - ptr.sy) / 60; }
+  if (ptr && ptr.drag && !ptr.build && !ptr.wall && !pinch && !wallDrag && !(S && S.build)) { dx = (ptr.x - ptr.sx) / 60; dy = (ptr.y - ptr.sy) / 60; }
   if (keys.w || keys.arrowup) dy -= 1; if (keys.s || keys.arrowdown) dy += 1;
   if (keys.a || keys.arrowleft) dx -= 1; if (keys.d || keys.arrowright) dx += 1;
   const len = Math.hypot(dx, dy);
   if (len > 1) { dx /= len; dy /= len; }
   if (len > 0.05) { m.face = Math.atan2(dy, dx); }
-  m.x = clamp(m.x + dx * m.speed * dt, 10, W - 10); m.y = clamp(m.y + dy * m.speed * dt, 10, H - 10);
+  tryMove(m, m.x + dx * m.speed * dt, m.y + dy * m.speed * dt, true);
   // monarch attack
   m.cd -= dt;
   const enemies = enemiesList();
@@ -675,7 +872,7 @@ function update(dt) {
       }
     }
     const d = Math.hypot(tx - a.x, ty - a.y);
-    if (d > 4) { const sp = Math.min(d, spd * dt); a.x += (tx - a.x) / d * sp; a.y += (ty - a.y) / d * sp; }
+    if (d > 4) { const sp = Math.min(d, spd * dt); tryMove(a, a.x + (tx - a.x) / d * sp, a.y + (ty - a.y) / d * sp, true); }
     a.cd -= dt;
     if (a.cd <= 0) {
       let best = null, bd = 210;
@@ -907,6 +1104,52 @@ function paintWall(pale, wood) {
     }
   });
   spr.gy = 24;
+  return spr;
+}
+function paintGate(open, pale) {
+  const top = pale ? '#b7c0ae' : '#e7e2d8';
+  const face = pale ? '#8d9686' : '#c9c2b4';
+  const side = pale ? '#5e675e' : '#8f877c';
+  const ink = pale ? '#3c443c' : '#7a7064';
+  const wood = pale ? '#6a7062' : '#8a5a32';
+  const woodL = pale ? '#8d9686' : '#c4925a';
+  const spr = bake(44, 38, g => {
+    // pillars
+    poly(g, [[2, 14], [10, 12], [10, 34], [2, 34]], face);
+    poly(g, [[34, 12], [42, 10], [42, 32], [34, 34]], side);
+    poly(g, [[34, 12], [34, 34], [10, 34], [10, 12]], face);
+    // lintel / arch
+    poly(g, [[2, 14], [22, 4], [42, 10], [34, 12], [10, 12]], top);
+    poly(g, [[10, 12], [22, 8], [34, 12], [34, 16], [22, 14], [10, 16]], top);
+    g.strokeStyle = ink; g.globalAlpha = 0.55; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(2, 24); g.lineTo(10, 24); g.moveTo(34, 24); g.lineTo(42, 24); g.stroke();
+    g.globalAlpha = 1;
+    if (open && !pale) {
+      // open doors swung inward, dark passage
+      g.fillStyle = 'rgba(40,28,18,.78)';
+      g.beginPath(); g.moveTo(12, 16); g.lineTo(32, 16); g.lineTo(32, 34); g.lineTo(12, 34); g.fill();
+      poly(g, [[10, 16], [7, 14], [7, 33], [10, 34]], woodL);
+      poly(g, [[34, 16], [37, 14], [37, 33], [34, 34]], wood);
+      g.strokeStyle = '#5c3a24'; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(8.5, 20); g.lineTo(8.5, 28); g.moveTo(35.5, 20); g.lineTo(35.5, 28); g.stroke();
+    } else {
+      // closed doors
+      poly(g, [[11, 16], [22, 15], [22, 34], [11, 34]], woodL);
+      poly(g, [[22, 15], [33, 16], [33, 34], [22, 34]], wood);
+      g.strokeStyle = pale ? '#3c443c' : '#5c3a24'; g.lineWidth = 1.1;
+      g.beginPath(); g.moveTo(22, 15); g.lineTo(22, 34); g.stroke();
+      g.fillStyle = pale ? '#9dff7a' : '#f0c14a';
+      g.beginPath(); g.arc(19, 25, 1.3, 0, 7); g.arc(25, 25, 1.3, 0, 7); g.fill();
+    }
+    if (pale) {
+      disc(g, 16, 10, 2.4, '#e7ecdf');
+      disc(g, 15.3, 9.6, 0.5, '#1c2418'); disc(g, 16.7, 9.6, 0.5, '#1c2418');
+    } else {
+      g.strokeStyle = 'rgba(255,255,255,.4)'; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(6, 10); g.lineTo(22, 5); g.lineTo(38, 10); g.stroke();
+    }
+  });
+  spr.gy = 30;
   return spr;
 }
 function paintTower(pale) {
@@ -1545,6 +1788,9 @@ function buildArt() {
   Art.wallW = paintWall(false, true);
   Art.wallSP = paintWall(true, false);
   Art.wallWP = paintWall(true, true);
+  Art.gateC = paintGate(false, false);
+  Art.gateO = paintGate(true, false);
+  Art.gateP = paintGate(false, true);
   Art.tower = paintTower(false);
   Art.towerP = paintTower(true);
   Art.fort = paintFort(false);
@@ -1777,15 +2023,17 @@ function shadow(x, y, rw, rh) {
   ctx.drawImage(Art.shadow.c, x - rw, y - rh * 0.45, rw * 2, rh);
 }
 function blit(spr, x, y, opt) {
+  if (!spr || !spr.c) return;
   const gy = spr.gy != null ? spr.gy : spr.h;
   const bob = opt && opt.bob || 0;
   const sc = opt && opt.sc || 1;
   ctx.save();
-  ctx.translate(x, y + bob);
-  if (opt && opt.flip) ctx.scale(-1, 1);
-  if (sc !== 1) ctx.scale(sc, sc);
-  ctx.drawImage(spr.c, -spr.w / 2, -gy, spr.w, spr.h);
-  ctx.restore();
+  try {
+    ctx.translate(x, y + bob);
+    if (opt && opt.flip) ctx.scale(-1, 1);
+    if (sc !== 1) ctx.scale(sc, sc);
+    ctx.drawImage(spr.c, -spr.w / 2, -gy, spr.w, spr.h);
+  } finally { ctx.restore(); }
 }
 function actorMotion(e) {
   const dx = e.x - (e._px == null ? e.x : e._px);
@@ -1826,6 +2074,16 @@ function placeTag(txt, wx, wy, size, col, accent) {
   const p = w2s(wx, wy);
   if (p.y - sh / 2 < TOP_CHROME || p.y + sh / 2 > vh - BOT_CHROME) return;
   tag(txt, wx, wy, size, col, accent);
+}
+function placeTagClamped(txt, wx, wy, size, col, accent) {
+  ctx.font = `800 ${size}px "Segoe UI", system-ui, sans-serif`;
+  const sh = (size + 8) * scale;
+  const tw = (ctx.measureText(txt).width + 16) * scale;
+  const p = w2s(wx, wy);
+  p.x = clamp(p.x, tw / 2 + 8, vw - tw / 2 - 8);
+  p.y = clamp(p.y, TOP_CHROME + sh / 2 + 2, vh - BOT_CHROME - sh / 2 - 2);
+  const w = s2w(p.x, p.y);
+  tag(txt, w.x, w.y, size, col, accent);
 }
 function nameTag(txt, x, y, size, col, accent) {
   const m = S.monarch;
@@ -1906,23 +2164,34 @@ function drawRock(rk) {
   shadow(rk.x, rk.y, 8 * rk.s, 3.5 * rk.s);
   blit(spr, rk.x, rk.y, { sc: rk.s });
 }
+function gateOpen(b) {
+  if (!b || b.owner === 'pale' || b.built < 1) return false;
+  const r = (b.r || 16) + 28;
+  if (dist(S.monarch, b) < r + 10) return true;
+  for (const a of S.archers) if (dist(a, b) < r) return true;
+  for (const f of S.folk) if (f.role !== 'vagrant' && dist(f, b) < r) return true;
+  return false;
+}
 function buildingSpr(b) {
   const pale = b.owner === 'pale';
   if (b.type === 'wall') {
     const wood = (((b.x * 3 + b.y * 5) | 0) & 1) === 0;
     return pale ? (wood ? Art.wallWP : Art.wallSP) : (wood ? Art.wallW : Art.wallS);
   }
+  if (b.type === 'gate') return pale ? Art.gateP : (gateOpen(b) ? Art.gateO : Art.gateC);
+  if (b.tool) return Art.stand[b.tool] || Art.stand.bow;
   if (b.type === 'fort') return pale ? Art.fortP : Art.fort;
   if (b.type === 'house') return pale ? Art.houseP : (b.hp < b.max ? Art.houseDmg : Art.house);
-  if (b.type === 'farm') return pale ? Art.farmP : Art.farm;
+  if (b.type === 'farm') return pale ? Art.farm.pale : Art.farm.tilled;
+  if (b.type === 'tower') return pale ? Art.towerP : Art.tower;
   return pale ? Art.towerP : Art.tower;
 }
 function drawScaffold(b) {
   const spr = buildingSpr(b);
   ctx.globalAlpha = 0.16 + 0.45 * b.built;
-  blit(spr, b.x, b.y, { sc: b.type === 'wall' ? 1.18 : 1 });
+  blit(spr, b.x, b.y, { sc: (b.type === 'wall' || b.type === 'gate') ? 1.18 : 1 });
   ctx.globalAlpha = 1;
-  const sc = b.type === 'farm' ? 0.72 : b.type === 'wall' ? 0.78 : b.type === 'house' ? 0.92 : 1;
+  const sc = b.type === 'farm' ? 0.72 : (b.type === 'wall' || b.type === 'gate') ? 0.78 : b.type === 'house' ? 0.92 : (b.tool ? 0.9 : 1);
   const stage = b.built < 0.33 ? 0 : b.built < 0.66 ? 1 : 2;
   shadow(b.x, b.y + 2, 16 * sc, 5);
   blit(Art.scaffold[stage], b.x, b.y + 2, { sc });
@@ -1934,6 +2203,7 @@ function drawScaffold(b) {
 }
 function drawBuilding(b) {
   if (b.built < 1) return drawScaffold(b);
+  if (b.tool) return drawStand(b);
   if (b.type === 'farm') {
     const pale = b.owner === 'pale';
     const worked = b.farmer && S.folk.includes(b.farmer);
@@ -1946,8 +2216,8 @@ function drawBuilding(b) {
   }
   const spr = buildingSpr(b);
   const pale = b.owner === 'pale';
-  const sc = b.type === 'wall' ? 1.18 : 1;
-  shadow(b.x, b.y + 2, (b.type === 'fort' ? 24 : b.type === 'wall' || b.type === 'house' ? 17 : 14) * sc, (b.type === 'fort' ? 9 : 6) * sc);
+  const sc = (b.type === 'wall' || b.type === 'gate') ? 1.18 : 1;
+  shadow(b.x, b.y + 2, (b.type === 'fort' ? 24 : b.type === 'wall' || b.type === 'gate' || b.type === 'house' ? 17 : 14) * sc, (b.type === 'fort' ? 9 : 6) * sc);
   blit(spr, b.x, b.y, { sc });
   if (spr.flag) drawPennant(b.x + spr.flag.dx, b.y + spr.flag.dy, spr.flag.w, spr.flag.h, pale, b.x);
   if (spr.flames) for (const f of spr.flames) flameAt(b.x + f.dx, b.y + f.dy, pale, b.x);
@@ -2076,7 +2346,73 @@ function drawStand(st) {
     ctx.drawImage(Art.coin.c, st.x - (c * 9) / 2 + i * 9, st.y - 46, 9, 9);
   }
   ctx.globalAlpha = 1;
-  placeTag(TOOL[st.tool].label + ' ' + c, st.x, st.y + 14, 11, '#fff6e4', st.tools ? '#8ee0b0' : '#e6c27a');
+}
+function drawStockBadge(st) {
+  if (!st || st.built < 1) return;
+  const p = w2s(st.x, st.y - 28);
+  const size = 16, pad = 7, ih = 16;
+  const txt = String(st.tools);
+  ctx.font = `800 ${size}px "Segoe UI", system-ui, sans-serif`;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const tw = ctx.measureText(txt).width;
+  const w = pad + ih + 5 + tw + pad, h = 24;
+  const x = Math.round(p.x - w / 2), y = Math.round(p.y - h / 2);
+  if (y + h < TOP_CHROME - 4 || y > vh - BOT_CHROME + 4 || x + w < 4 || x > vw - 4) return;
+  rrPath(ctx, x, y, w, h, 8);
+  ctx.fillStyle = 'rgba(28,20,14,.88)';
+  ctx.fill();
+  ctx.lineWidth = 2.2;
+  ctx.strokeStyle = st.tools ? '#8ee0b0' : '#e6c27a';
+  ctx.stroke();
+  const ic = Art.tool[st.tool];
+  if (ic) ctx.drawImage(ic.c, x + pad, y + (h - ih) / 2, ih, ih);
+  ctx.fillStyle = st.tools ? '#e9fff2' : '#fff6e4';
+  ctx.fillText(txt, x + pad + ih + 5, y + h / 2 + 0.5);
+}
+function drawWallGhosts() {
+  if (!wallDrag || !S) return;
+  const plan = planWallLine(wallDrag.x0, wallDrag.y0, wallDrag.x1, wallDrag.y1);
+  wallDrag.plan = plan;
+  const spr = Art.wallS;
+  for (const pt of plan) {
+    ctx.save();
+    ctx.globalAlpha = pt.ok ? 0.55 : 0.28;
+    ctx.translate(pt.x, pt.y);
+    ctx.drawImage(spr.c, -spr.w / 2, -spr.gy, spr.w, spr.h);
+    ctx.restore();
+    if (!pt.ok) {
+      ctx.strokeStyle = 'rgba(255,100,80,.7)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y - 8, 10, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+  if (plan.length) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(240,193,74,.55)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 5]);
+    ctx.beginPath(); ctx.moveTo(wallDrag.x0, wallDrag.y0); ctx.lineTo(wallDrag.x1, wallDrag.y1); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+}
+function drawWallCostBadge() {
+  if (!wallDrag || !wallDrag.plan) return;
+  const plan = wallDrag.plan;
+  const n = plan.filter(pt => pt.ok).length;
+  const cost = n * COST.wall, afford = S.coins >= cost && n > 0;
+  const mid = plan[plan.length >> 1] || plan[0];
+  const p = w2s(mid.x, mid.y - 36);
+  const txt = n ? (n + ' wall' + (n === 1 ? '' : 's') + ' · ' + cost + ' coins') : (plan[0].why || 'Cannot place');
+  ctx.font = '800 16px "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const tw = ctx.measureText(txt).width, w = tw + 22, h = 26;
+  const x = clamp(p.x, 16 + w / 2, vw - 16 - w / 2), y = clamp(p.y, TOP_CHROME + 18, vh - BOT_CHROME - 18);
+  rrPath(ctx, x - w / 2, y - h / 2, w, h, 10);
+  ctx.fillStyle = 'rgba(28,20,14,.9)'; ctx.fill();
+  ctx.lineWidth = 2.2; ctx.strokeStyle = afford ? '#8ee0b0' : '#ff8d7a'; ctx.stroke();
+  ctx.fillStyle = afford ? '#e9fff2' : '#ffe8e2';
+  ctx.fillText(txt, x, y + 0.5);
 }
 function drawDrop(d) {
   const s = 1 - Math.min(0.5, d.z / 80);
@@ -2393,7 +2729,6 @@ function render() {
   for (const g of S.guardians) if (vis(g.x, g.y)) pushP(g.y, 'guard', g);
   for (const a of S.archers) if (vis(a.x, a.y)) pushP(a.y, 'arch', a);
   for (const f of S.folk) if (vis(f.x, f.y)) pushP(f.y, 'folk', f);
-  for (const st of S.stands) if (vis(st.x, st.y)) pushP(st.y, 'stand', st);
   for (const d of S.drops) if (vis(d.x, d.y)) pushP(d.y + 0.5, 'drop', d);
   if (S.camp && vis(S.camp.x, S.camp.y)) pushP(S.camp.y, 'camp', S.camp);
   for (const u of S.undead) if (vis(u.x, u.y)) pushP(u.y, 'und', u);
@@ -2405,18 +2740,23 @@ function render() {
   }
   for (let i = 0; i < pileN; i++) {
     const it = pile[i];
-    if (it.k === 'tree') drawTree(it.a);
-    else if (it.k === 'rock') drawRock(it.a);
-    else if (it.k === 'bld') drawBuilding(it.a);
-    else if (it.k === 'core') drawCore(it.a);
-    else if (it.k === 'guard') drawGuardian(it.a);
-    else if (it.k === 'arch') drawArcher(it.a);
-    else if (it.k === 'und') drawUndead(it.a);
-    else if (it.k === 'folk') drawFolk(it.a);
-    else if (it.k === 'stand') drawStand(it.a);
-    else if (it.k === 'drop') drawDrop(it.a);
-    else if (it.k === 'camp') drawCamp(it.a);
-    else drawMonarch();
+    try {
+      if (it.k === 'tree') drawTree(it.a);
+      else if (it.k === 'rock') drawRock(it.a);
+      else if (it.k === 'bld') drawBuilding(it.a);
+      else if (it.k === 'core') drawCore(it.a);
+      else if (it.k === 'guard') drawGuardian(it.a);
+      else if (it.k === 'arch') drawArcher(it.a);
+      else if (it.k === 'und') drawUndead(it.a);
+      else if (it.k === 'folk') drawFolk(it.a);
+      else if (it.k === 'stand') drawStand(it.a);
+      else if (it.k === 'drop') drawDrop(it.a);
+      else if (it.k === 'camp') drawCamp(it.a);
+      else drawMonarch();
+    } catch (err) {
+      try { ctx.restore(); } catch (_) {}
+      if (!S._drawErr) { S._drawErr = String(err); console.error('draw error', it.k, err); }
+    }
   }
 
   for (const r of S.regions) if (vis(r.x, r.y)) {
@@ -2430,7 +2770,8 @@ function render() {
     if (!vis(g.x, g.y) || !edgeOf(g.x, g.y).on) continue;
     nameTag(g.name, g.x, g.y + g.r + 16, 13, g.kind === 'warden' ? '#d7f0cc' : '#ffd0c8', g.kind === 'warden' ? '#9ddea8' : '#e07a68');
   }
-  if (S.camp && vis(S.camp.x, S.camp.y)) placeTag('Vagrant camp', S.camp.x, S.camp.y + 18, 12, '#fff6e4', '#c9b488');
+  if (S.camp && vis(S.camp.x, S.camp.y)) placeTagClamped('Vagrant camp', S.camp.x, S.camp.y + 18, 12, '#fff6e4', '#c9b488');
+  drawWallGhosts();
   for (const a of S.archers) if (a.follow && vis(a.x, a.y)) { ctx.strokeStyle = 'rgba(240,193,74,.85)'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.ellipse(a.x, a.y + 3, 11, 4.5, 0, 0, Math.PI * 2); ctx.stroke(); }
 
   const m = S.monarch;
@@ -2460,6 +2801,8 @@ function render() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
+  for (const st of S.stands) if (st.built >= 1) drawStockBadge(st);
+  drawWallCostBadge();
   for (const g of S.guardians) {
     const e = edgeOf(g.x, g.y);
     if (e.on) continue;
@@ -2491,7 +2834,7 @@ function render() {
       ctx.restore();
     }
   }
-  if (ptr && ptr.drag) {
+  if (ptr && ptr.drag && !ptr.build && !ptr.wall && !pinch && !wallDrag && !(S && S.build)) {
     ctx.beginPath(); ctx.arc(ptr.sx, ptr.sy, 26, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(28,20,14,.16)'; ctx.fill();
     ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,236,200,.32)'; ctx.stroke();
@@ -2527,6 +2870,15 @@ function drawHud() {
   const wk = workers(), cap = housingCap();
   setVal('hWorkers', 'w', wk + '/' + cap);
   $('hWorkers').classList.toggle('full', wk >= cap);
+  if (wallDrag && wallDrag.plan) {
+    const n = wallDrag.plan.filter(pt => pt.ok).length;
+    const cost = n * COST.wall;
+    $('hint').textContent = n
+      ? (`${n} wall${n === 1 ? '' : 's'} · ${cost} coins` + (S.coins < cost ? ' — not enough' : ' · release to order, Cancel to stop'))
+      : ((wallDrag.plan[0] && wallDrag.plan[0].why) || 'Drag to lay a Wall · Cancel to stop');
+  } else if (S.build === 'wall' && !$('hint').textContent) {
+    $('hint').textContent = `Drag to lay a Wall · ${COST.wall} coins each · Cancel to stop`;
+  }
   const ra = S.rally ? 'on' : 'off';
   if (hud.ra !== ra) { hud.ra = ra; $('btnRally').querySelector('i').textContent = ra; }
   if (DEBUG) {
@@ -2548,10 +2900,31 @@ function frame(now) {
 // ---------- debug / test hooks ----------
 window.__bc = {
   get S() { return S; }, get fps() { return fps; }, w2s, s2w, regionIdAt, skipPhase, newGame,
-  teleport(x, y) { S.monarch.x = x; S.monarch.y = y; },
+  get zoom() { return zoom; }, set zoom(z) { zoom = z; applyScale(); },
+  get scale() { return scale; },
+  setZoomAt, planWallLine, commitWallLine, placeBlocked, swapWallForGate, gateOpen, solidAt, tryMove,
+  get wallDrag() { return wallDrag; },
+  setWallDrag(x0, y0, x1, y1) { wallDrag = { x0, y0, x1, y1, plan: planWallLine(x0, y0, x1, y1) }; return wallDrag.plan; },
+  clearWallDrag() { wallDrag = null; },
+  teleport(x, y) { S.monarch.x = x; S.monarch.y = y; lookX = x; lookY = y; },
   coins(n) { S.coins += n; }, heal() { S.monarch.hp = S.monarch.max; },
   forceLose(id) { const r = S.regions[id]; if (r && r.core) damage(r.core, r.core.hp + 1); },
   guardianOf(id) { return S.guardians.find(g => g.region === id); },
+  findClear(type, cx, cy) {
+    for (let rad = 70; rad <= 260; rad += 28) {
+      for (let a = 0; a < 16; a++) {
+        const x = cx + Math.cos(a * Math.PI / 8) * rad, y = cy + Math.sin(a * Math.PI / 8) * rad;
+        if (!placeBlocked(type, x, y)) return { x, y };
+      }
+    }
+    return null;
+  },
+  placeUndead(kind, x, y) {
+    const spec = UNDEAD[kind] || UNDEAD.shambler;
+    const u = { type: 'undead', kind, x, y, r: spec.r, hp: spec.hp, max: spec.hp, speed: spec.speed, dmg: spec.dmg, cd: 0, tgt: null, rt: 0, jit: 0 };
+    S.undead.push(u); S.stats.spawned++;
+    return u;
+  },
   timeScale: 1, TUNE, dropCoin, workers, housingCap, toggleRally, debug: DEBUG,
 };
 
