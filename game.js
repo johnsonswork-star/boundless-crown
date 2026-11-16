@@ -1606,31 +1606,82 @@ function paintFolk(role, pose) {
 }
 function paintToolIcon(tool) {
   return bake(16, 18, g => {
+    const ink = '#2a1c10';
     if (tool === 'bow') {
-      g.strokeStyle = '#6b4630'; g.lineWidth = 2; g.beginPath(); g.arc(5, 9, 6.4, -1.15, 1.15); g.stroke();
-      g.strokeStyle = '#f6efe2'; g.lineWidth = 0.9; g.beginPath(); g.moveTo(7.2, 3.2); g.lineTo(7.2, 14.8); g.stroke();
-      g.fillStyle = '#c4473a'; g.beginPath(); g.moveTo(12, 8); g.lineTo(15.5, 9); g.lineTo(12, 10); g.fill();
+      g.strokeStyle = ink; g.lineWidth = 3.6;
+      g.beginPath(); g.arc(5.4, 9, 6.1, -1.2, 1.2); g.stroke();
+      g.strokeStyle = '#e2b15a'; g.lineWidth = 2.3;
+      g.beginPath(); g.arc(5.4, 9, 6.1, -1.2, 1.2); g.stroke();
+      g.strokeStyle = '#fff6e0'; g.lineWidth = 1.15;
+      g.beginPath(); g.moveTo(6.8, 3.5); g.lineTo(6.8, 14.5); g.stroke();
+      g.fillStyle = ink;
+      g.beginPath(); g.moveTo(9.1, 7.15); g.lineTo(15.4, 9); g.lineTo(9.1, 10.85); g.fill();
+      g.fillStyle = '#e24a38';
+      g.beginPath(); g.moveTo(9.5, 7.55); g.lineTo(14.5, 9); g.lineTo(9.5, 10.45); g.fill();
+      g.fillStyle = '#ffd27a';
+      g.fillRect(8.6, 8.45, 2.1, 1.1);
     } else if (tool === 'hammer') {
-      g.strokeStyle = '#6b4630'; g.lineWidth = 2.2; g.beginPath(); g.moveTo(8, 16.5); g.lineTo(8, 6); g.stroke();
-      g.fillStyle = '#9aa3ad'; g.fillRect(2.4, 2.2, 11, 4.6);
-      g.fillStyle = '#e4e8ee'; g.fillRect(2.4, 2.2, 11, 1.5);
+      g.strokeStyle = ink; g.lineWidth = 3.5;
+      g.beginPath(); g.moveTo(8.1, 16.7); g.lineTo(8.1, 6.4); g.stroke();
+      g.strokeStyle = '#e2b15a'; g.lineWidth = 2.15;
+      g.beginPath(); g.moveTo(8.1, 16.5); g.lineTo(8.1, 6.8); g.stroke();
+      g.fillStyle = ink; g.beginPath();
+      g.roundRect(1.5, 1.5, 13, 5.5, 1.3); g.fill();
+      g.fillStyle = '#e7eef6'; g.beginPath();
+      g.roundRect(2.1, 2.05, 11.8, 4.3, 1); g.fill();
+      g.fillStyle = '#fff'; g.globalAlpha = 0.7;
+      g.fillRect(2.5, 2.3, 8.2, 1.35);
+      g.globalAlpha = 1;
+      g.fillStyle = '#9aa3ae';
+      g.fillRect(2.1, 5.15, 11.8, 1.15);
     } else {
-      g.strokeStyle = '#6b4630'; g.lineWidth = 1.8; g.beginPath(); g.moveTo(11, 16.5); g.lineTo(12, 3); g.stroke();
-      g.strokeStyle = '#e7eef4'; g.lineWidth = 2; g.beginPath(); g.moveTo(12, 3.2); g.quadraticCurveTo(4, 1.2, 1.4, 7); g.stroke();
+      g.strokeStyle = ink; g.lineWidth = 3.3;
+      g.beginPath(); g.moveTo(6.2, 16.8); g.lineTo(10.6, 4.4); g.stroke();
+      g.strokeStyle = '#e2b15a'; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(6.1, 16.6); g.lineTo(10.3, 4.8); g.stroke();
+      g.fillStyle = ink;
+      g.beginPath();
+      g.moveTo(10.6, 3.1); g.quadraticCurveTo(2.2, 1.4, 1.3, 7.2);
+      g.quadraticCurveTo(5.2, 4.8, 8.2, 6.4); g.quadraticCurveTo(10, 4.4, 10.6, 3.1); g.fill();
+      g.fillStyle = '#f4f7fb';
+      g.beginPath();
+      g.moveTo(10.2, 3.5); g.quadraticCurveTo(3.4, 2.2, 2.2, 6.6);
+      g.quadraticCurveTo(5.4, 4.8, 7.8, 6); g.quadraticCurveTo(9.4, 4.6, 10.2, 3.5); g.fill();
+      g.strokeStyle = '#fff'; g.globalAlpha = 0.7; g.lineWidth = 0.8;
+      g.beginPath(); g.moveTo(8.6, 3.6); g.quadraticCurveTo(4.2, 3.2, 3, 5.6); g.stroke();
+      g.globalAlpha = 1;
     }
   });
 }
 function paintSignTool(g, tool) {
   g.fillStyle = '#f3e6c4'; g.fillRect(14, 2.2, 12, 8);
   g.strokeStyle = '#6e4328'; g.lineWidth = 1; g.strokeRect(14, 2.2, 12, 8);
-  g.save(); g.translate(16.2, 3.2); g.scale(0.55, 0.42);
+  g.save(); g.translate(16.3, 3.15); g.scale(0.58, 0.46);
+  g.lineCap = 'round'; g.lineJoin = 'round';
   if (tool === 'bow') {
-    g.strokeStyle = '#6b4630'; g.lineWidth = 2.4; g.beginPath(); g.arc(6, 8, 6, -1.1, 1.1); g.stroke();
+    g.strokeStyle = '#3a2418'; g.lineWidth = 3.2;
+    g.beginPath(); g.arc(5.2, 8, 5.5, -1.15, 1.15); g.stroke();
+    g.strokeStyle = '#c4843a'; g.lineWidth = 1.8;
+    g.beginPath(); g.arc(5.2, 8, 5.5, -1.15, 1.15); g.stroke();
+    g.strokeStyle = '#fff6e4'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(6.4, 3.4); g.lineTo(6.4, 12.6); g.stroke();
   } else if (tool === 'hammer') {
-    g.fillStyle = '#8d96a0'; g.fillRect(2, 2, 10, 4); g.strokeStyle = '#6b4630'; g.lineWidth = 2; g.beginPath(); g.moveTo(7, 6); g.lineTo(7, 14); g.stroke();
+    g.strokeStyle = '#3a2418'; g.lineWidth = 2.6;
+    g.beginPath(); g.moveTo(7.2, 13.5); g.lineTo(7.2, 6); g.stroke();
+    g.strokeStyle = '#c4843a'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(7.2, 13.2); g.lineTo(7.2, 6.4); g.stroke();
+    g.fillStyle = '#3a2418'; g.fillRect(1.2, 1.5, 12, 4.6);
+    g.fillStyle = '#e7eef6'; g.fillRect(1.7, 1.9, 11, 3.6);
+    g.fillStyle = '#fff'; g.globalAlpha = 0.75; g.fillRect(2, 2.1, 6.5, 1.1); g.globalAlpha = 1;
   } else {
-    g.strokeStyle = '#d5dde4'; g.lineWidth = 2.2; g.beginPath(); g.moveTo(12, 3); g.quadraticCurveTo(4, 2, 2, 8); g.stroke();
-    g.strokeStyle = '#6b4630'; g.beginPath(); g.moveTo(10, 4); g.lineTo(8, 14); g.stroke();
+    g.strokeStyle = '#3a2418'; g.lineWidth = 2.6;
+    g.beginPath(); g.moveTo(5.6, 14); g.lineTo(9.2, 4.2); g.stroke();
+    g.strokeStyle = '#c4843a'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(5.5, 13.6); g.lineTo(8.8, 4.6); g.stroke();
+    g.fillStyle = '#3a2418';
+    g.beginPath(); g.moveTo(9, 3); g.quadraticCurveTo(2, 1.6, 1.2, 6.6); g.quadraticCurveTo(4.6, 4.6, 7.2, 6); g.quadraticCurveTo(8.6, 4.2, 9, 3); g.fill();
+    g.fillStyle = '#f4f7fb';
+    g.beginPath(); g.moveTo(8.6, 3.4); g.quadraticCurveTo(3, 2.4, 2.1, 6); g.quadraticCurveTo(4.8, 4.6, 6.8, 5.6); g.quadraticCurveTo(8, 4.4, 8.6, 3.4); g.fill();
   }
   g.restore();
 }
