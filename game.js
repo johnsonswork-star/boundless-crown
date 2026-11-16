@@ -159,19 +159,69 @@ function setupHome() {
   for (let i = 0; i < TUNE.startHouses; i++) S.buildings.push(mkBld('house', h.x + 100 + i * 46, h.y - 24, 0, 1));
   S.stands = [];
   for (let i = 0; i < TUNE.startBuilders; i++) S.folk.push(mkFolk('builder', h.x - 46 + i * 18, h.y + 50));
-  // vagrant camp: just inside the nearest wild region, as far from its guardian as possible
-  const wild = S.regions.filter(r => r.id !== 0).sort((a, b) => dist(a, h) - dist(b, h))[0];
-  let camp = null;
-  for (let t = 0.47; t >= 0.15; t -= 0.01) {
-    const x = wild.x + (h.x - wild.x) * t, y = wild.y + (h.y - wild.y) * t;
-    if (regionIdAt(x, y) === wild.id && regionIdAt(x, y + 40) === wild.id) { camp = { x, y, region: wild.id }; break; }
-  }
-  S.camp = camp || { x: wild.x + (h.x - wild.x) * 0.3, y: wild.y + (h.y - wild.y) * 0.3, region: wild.id };
-  for (let i = 0; i < TUNE.vagrantStart; i++) spawnVagrant();
+  // Vagrant camp only on unowned land, just inside the nearest wild/pale region toward home.
+  S.camp = nearestCampSpot(h);
+  if (S.camp) for (let i = 0; i < TUNE.vagrantStart; i++) spawnVagrant();
 }
 function spawnVagrant() {
   const c = S.camp; if (!c) return;
   S.folk.push(mkFolk('vagrant', c.x + (Math.random() - .5) * 60, c.y + 10 + (Math.random() - .5) * 40));
+}
+function isUnownedRegion(r) { return !!r && r.owner !== 'player'; }
+function findCampSpot(r) {
+  if (!isUnownedRegion(r)) return null;
+  const toward = (S.regions && S.regions[0]) || { x: CX, y: CY };
+  for (let t = 0.47; t >= 0.15; t -= 0.01) {
+    const x = r.x + (toward.x - r.x) * t, y = r.y + (toward.y - r.y) * t;
+    if (regionIdAt(x, y) === r.id && regionIdAt(x, y + 40) === r.id) return { x, y, region: r.id };
+  }
+  for (let a = 0; a < 16; a++) {
+    const x = r.x + Math.cos(a * Math.PI / 8) * 80, y = r.y + Math.sin(a * Math.PI / 8) * 80;
+    if (regionIdAt(x, y) === r.id && regionIdAt(x, y + 40) === r.id) return { x, y, region: r.id };
+  }
+  return { x: r.x + (toward.x - r.x) * 0.3, y: r.y + (toward.y - r.y) * 0.3, region: r.id };
+}
+function nearestCampSpot(from) {
+  const origin = from || S.camp || (S.regions && S.regions[0]) || { x: CX, y: CY };
+  let best = null, bd = 1e9;
+  for (const r of S.regions) {
+    const s = findCampSpot(r);
+    if (!s) continue;
+    const d = dist(s, origin);
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+function settleVagrants() {
+  if (!S) return;
+  const vags = S.folk.filter(f => f.role === 'vagrant');
+  if (S.camp) {
+    for (const f of vags) {
+      // Already near the (possibly new) camp? Leave them; otherwise move them there.
+      if (Math.hypot(f.x - S.camp.x, f.y - (S.camp.y + 10)) < 90) continue;
+      S.fx.push({ k: 'puff', x: f.x, y: f.y, t: 0.4, t0: 0.4 });
+      f.x = S.camp.x + (Math.random() - .5) * 60;
+      f.y = S.camp.y + 10 + (Math.random() - .5) * 40;
+      f.tx = null; f.ty = null; f.state = 'idle';
+    }
+    return;
+  }
+  for (const f of vags) S.fx.push({ k: 'puff', x: f.x, y: f.y, t: 0.45, t0: 0.45 });
+  if (vags.length) S.folk = S.folk.filter(f => f.role !== 'vagrant');
+}
+function refreshCamps() {
+  if (!S) return;
+  if (S.camp) {
+    const r = S.regions[S.camp.region];
+    if (isUnownedRegion(r)) return;
+    const old = S.camp;
+    S.fx.push({ k: 'puff', x: old.x, y: old.y, t: 0.6, t0: 0.6, big: 1 });
+    S.camp = nearestCampSpot(old);
+    settleVagrants();
+    return;
+  }
+  S.camp = nearestCampSpot(S.regions[0]);
+  if (S.camp) settleVagrants();
 }
 function mkRegion(id, x, y) { return { id, x, y, name: NAMES[id], owner: 'wild', core: null, bonus: null, weakened: false }; }
 function mkCore(r, hp) { return { type: 'core', x: r.x, y: r.y, r: 20, hp, max: hp, region: r.id, keep: false }; }
@@ -496,6 +546,7 @@ function evictToCap() {
     over--; n++;
   }
   evictFolk(f => f.role === 'builder');
+  settleVagrants();
   return n;
 }
 function finishDemo(b) {
@@ -1105,6 +1156,7 @@ function captureRegion(r) {
   if (r.bonus === 'keep') { r.core.keep = true; r.core.max = r.core.hp = TUNE.coreKeep; extra = ' +free Ruin Keep'; }
   r.bonus = null;
   toast(`Region captured: ${r.name}!${extra}`, 'good');
+  refreshCamps();
 }
 function loseRegion(r) {
   r.owner = 'pale'; r.core = null; S.mapDirty = true; S.stats.losses++;
@@ -1117,6 +1169,7 @@ function loseRegion(r) {
   S.guardians.push({ kind: 'warden', name: 'Pale Warden', x: r.x, y: r.y, hx: r.x, hy: r.y, r: 24, hp, max: hp, dmg: 11, cd: 0, region: r.id });
   toast(`${r.name} lost to the Pale Host!`, 'bad');
   if (S.focus === r.id) pickFocus();
+  refreshCamps();
   if (!owned().length) gameOver('All regions lost to the Pale Host');
 }
 function retakeRegion(r) {
@@ -1125,6 +1178,7 @@ function retakeRegion(r) {
   let n = 0;
   for (const b of S.buildings) if (b.region === r.id && b.owner === 'pale') { b.owner = 'player'; b.hp = Math.ceil(b.max * 0.6); n++; }
   toast(`${r.name} retaken! ${n} building${n === 1 ? '' : 's'} returned (damaged)`, 'good');
+  refreshCamps();
 }
 function gameOver(why) {
   if (S.over) return; S.over = true;
@@ -3684,6 +3738,7 @@ window.__bc = {
   get wallDrag() { return wallDrag; },
   setWallDrag(x0, y0, x1, y1) { wallDrag = { x0, y0, x1, y1, plan: planWallLine(x0, y0, x1, y1) }; return wallDrag.plan; },
   clearWallDrag() { wallDrag = null; },
+  findCampSpot, nearestCampSpot, refreshCamps, settleVagrants,
   teleport(x, y) { S.monarch.x = x; S.monarch.y = y; lookX = x; lookY = y; },
   coins(n) { S.coins += n; }, heal() { S.monarch.hp = S.monarch.max; },
   forceLose(id) { const r = S.regions[id]; if (r && r.core) damage(r.core, r.core.hp + 1); },
