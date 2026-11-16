@@ -13,7 +13,7 @@ const TOOL = {
 };
 // Tuning knobs (Kingdom-style economy). All in one place for playtest iteration.
 const TUNE = {
-  startCoins: 12, keepSlots: 1, houseSlots: 2, startHouses: 1, startBuilders: 1,
+  startCoins: 3, keepSlots: 0, houseSlots: 1, startHouses: 1, startBuilders: 1,
   trickleEvery: 10,              // +1 coin per owned region every N s by day (small passive)
   dropRange: 64, pickupGrace: 0.6, standMax: 3,
   standCost: { bow: 5, hammer: 3, scythe: 5 }, // Build-menu price; Hammer is cheap so you can get going
@@ -26,10 +26,11 @@ const TUNE = {
   coreHome: 280, coreCaptured: 150, coreRetaken: 130, coreKeep: 320,
   waveBase: 2, wavePerNight: 7, wavePerRegion: 2,
   necroRaiseEvery: 5, leaderDmg: 1.25,
+  necroWaveMul: 2, // every 10th day (10, 20, …) the wave is this many times larger and a Necromancer leads
   guardianLeash: 220, rallyRange: 280, folkSpeed: 72,
   monarchRegen: 4, // HP/s out of combat, day only — never at night
   treeCoin: 2, rockCoin: 3, // coins dropped when a Builder finishes a marked tree / rock
-  treeCost: 1, rockCost: 2, // coins you drop on the mark to pay a Builder (net profit vs treeCoin/rockCoin)
+  treeCost: 1, rockCost: 2, // deducted from the purse on the mark tap (net profit vs treeCoin/rockCoin)
   clearTime: { tree: 4, rock: 5 }, // seconds for a Builder to chop or break
   clearMarkRange: 170, // monarch must be this close to mark a tree or rock
 };
@@ -97,7 +98,7 @@ function newGame() {
   const seed = seeded ? ((+seedQ) || 0) : ((Math.random() * 1e9) | 0);
   const rnd = mulberry(seed);
   S = {
-    seed, t: 0, phase: 'day', phaseT: DAY, day: 1, nights: 0, coins: TUNE.startCoins, trickle: 0,
+    seed, t: 0, phase: 'day', phaseT: DAY, day: 1, nights: 0, nightSpawned: false, coins: TUNE.startCoins, trickle: 0,
     regions: [], buildings: [], archers: [], undead: [], guardians: [], fx: [],
     folk: [], drops: [], stands: [], camp: null, vagrantT: TUNE.vagrantEvery, rally: false, dropHold: false, dropT: 0, postT: 0,
     spawnQ: [], spawnT: 0, spawnGap: 1, leader: null, chaos: false, focus: null, waveSrc: null,
@@ -322,7 +323,7 @@ function setBuild(t) {
   if (!t) { $('hint').textContent = ''; lookFree = false; }
   else if (t === 'wall') $('hint').textContent = `Drag to lay a Wall · ${COST.wall} coins each · drag to a screen edge to scroll, two fingers to look around · Cancel to stop`;
   else if (t === 'gate') $('hint').textContent = `Tap to place a Gate, or tap a Wall to swap · ${COST.gate} coins · drag to look around`;
-  else if (t === 'clear') $('hint').textContent = `Tap a tree or rock near you to mark it · drop ${TUNE.treeCost} coin for a tree, ${TUNE.rockCost} for a rock · trees drop ${TUNE.treeCoin} coins, rocks ${TUNE.rockCoin} · drag to look around`;
+  else if (t === 'clear') $('hint').textContent = `Tap a tree or rock near you to clear it · ${TUNE.treeCost} coin for a tree, ${TUNE.rockCost} for a rock, taken from your purse · tap again to cancel and refund · trees drop ${TUNE.treeCoin} coins, rocks ${TUNE.rockCoin} · drag to look around`;
   else $('hint').textContent = `Tap your land to order a ${NICE[t]} · ${COST[t]} coins · drag to look around`;
 }
 function isStandType(t) { return !!TOOL[t]; }
@@ -395,30 +396,41 @@ function decorAt(x, y, rad) {
   for (const rk of S.rocks) { const d = dist(rk, pt) - (rk.r || 12); if (d < bd) { bd = d; best = rk; } }
   return best;
 }
+function unmarkClear(obj) {
+  if (!obj || !obj.marked) return;
+  const cost = clearCost(obj);
+  const refund = Math.min(cost, obj.paid || 0);
+  if (refund) { S.coins += refund; floatTxt(obj.x, obj.y - 36, '+' + refund, '#ffd56a'); }
+  obj.marked = false; obj.paid = 0; obj.prog = 0;
+  for (const f of S.folk) if (f.job === obj) f.job = null;
+  toast(decorKind(obj) === 'rock' ? 'Rock unmarked — coins refunded' : 'Tree unmarked — coin refunded');
+}
 function markClear(obj) {
   if (!obj) return null;
-  if (obj.marked) return obj;
+  if (obj.marked) { unmarkClear(obj); return obj; }
   const k = decorKind(obj), cost = k === 'rock' ? TUNE.rockCost : TUNE.treeCost;
   const drop = k === 'rock' ? TUNE.rockCoin : TUNE.treeCoin;
   if (S.coins < cost) {
-    toast(cost === 1 ? 'Need 1 coin to mark this tree' : 'Need ' + cost + ' coins to mark this rock', 'bad');
+    toast(cost === 1 ? 'Need 1 coin' : 'Need ' + cost + ' coins', 'bad');
     return null;
   }
-  obj.marked = true; obj.prog = 0; obj.paid = 0;
+  S.coins -= cost;
+  obj.marked = true; obj.prog = 0; obj.paid = cost;
+  floatTxt(obj.x, obj.y - 36, '-' + cost, '#ffb0a0');
   toast(k === 'rock'
-    ? `Rock marked — drop ${cost} coins to pay a Builder (drops ${drop} back)`
-    : `Tree marked — drop ${cost} coin to pay a Builder (drops ${drop} back)`);
+    ? `Rock marked — a Builder will break it (drops ${drop} coins)`
+    : `Tree marked — a Builder will chop it (drops ${drop} coins)`);
   return obj;
 }
 function tryMarkDecor(x, y, mode) {
   const rad = Math.max(36, 48 / scale);
   const hit = decorAt(x, y, rad);
-  if (!hit) { if (mode) toast('Tap a tree or rock to mark it'); return null; }
+  if (!hit) { if (mode) toast('Tap a tree or rock to clear it'); return null; }
   if (dist(hit, S.monarch) > TUNE.clearMarkRange) {
     if (mode) toast('Move closer to mark that', 'bad');
     return null;
   }
-  if (hit.marked) { if (mode) toast(decorKind(hit) === 'rock' ? 'Rock already marked' : 'Tree already marked'); return hit; }
+  if (hit.marked) { unmarkClear(hit); return hit; }
   // Truthy even when the player cannot afford it, so the tap is consumed after the toast.
   return markClear(hit) || true;
 }
@@ -569,12 +581,6 @@ function dropCoin() {
 }
 function claimTarget(d) {
   let best = null, bd = TUNE.dropRange;
-  const consider = o => {
-    if (!o.marked || clearPaid(o)) return;
-    const dd = dist(o, d); if (dd < bd) { bd = dd; best = o; }
-  };
-  for (const t of S.trees) consider(t);
-  for (const rk of S.rocks) consider(rk);
   if (S.regions[0].owner === 'player') for (const st of S.stands) if (st.owner === 'player' && st.built >= 1 && st.tools < TUNE.standMax) { const dd = dist(st, d); if (dd < bd) { bd = dd; best = st; } }
   const free = workers() < housingCap();
   d.noHouse = false;
@@ -602,6 +608,11 @@ function applyClaim(t) {
       ? `Rock paid — a Builder will break it (drops ${drop} coins)`
       : `Tree paid — a Builder will chop it (drops ${drop} coins)`, 'good');
   } else {
+    // Every hire path ends here (dropped coins on a vagrant, including at camp).
+    if (workers() >= housingCap()) {
+      toast('Build a house to hire more', 'bad');
+      return;
+    }
     t.role = 'villager'; t.state = 'home'; t.tx = null; S.stats.recruits++;
     floatTxt(t.x, t.y - 34, 'Recruited!', '#d6ffb0');
     toast('Vagrant recruited — walking home as a Villager', 'good');
@@ -623,7 +634,7 @@ function updateDrops(dt) {
       if (!d.loot) {
         const t = claimTarget(d);
         if (t) { d.dead = true; S.fx.push({ k: 'cfly', x: d.x, y: d.y, tx: t.x, ty: t.y - 16, t: 0.32, t0: 0.32 }); applyClaim(t); continue; }
-        if (d.noHouse && !d.warned) { d.warned = true; toast('No free housing — build a House first', 'bad'); }
+        if (d.noHouse && !d.warned) { d.warned = true; toast('Build a house to hire more', 'bad'); }
       }
     }
     if ((d.away || d.loot) && d.age > TUNE.pickupGrace && dist(d, m) < 26) { d.dead = true; S.coins++; floatTxt(m.x + 14, m.y - 50, '+1', '#ffd56a'); }
@@ -650,6 +661,39 @@ function moveTo(f, tx, ty, sp, dt) {
     }
   }
   return Math.hypot(tx - f.x, ty - f.y) < 6;
+}
+function workReach(j, f) {
+  return (j.r || 16) + (f.r || 9) + 8;
+}
+function approachSpots(j, f) {
+  const reach = workReach(j, f);
+  // Stay inside work reach, but outside the target itself when it blocks friends
+  // (a finished house / wall / tower). A single SW point often sat inside a neighbor.
+  const solidR = blocksFriend(j) ? (j.r || 16) + (f.r || 9) + 1.5 : 0;
+  const rad = Math.max(solidR, reach * 0.82);
+  const spots = [];
+  for (let i = 0; i < 8; i++) {
+    const a = i * Math.PI * 0.25 + 0.3;
+    spots.push({ x: j.x + Math.cos(a) * rad, y: j.y + Math.sin(a) * rad });
+  }
+  return spots;
+}
+function pickApproach(f, j) {
+  const spots = approachSpots(j, f);
+  let best = null, bd = 1e9, fallback = spots[0], fd = 1e9;
+  for (const pt of spots) {
+    const d = dist(f, pt);
+    if (d < fd) { fd = d; fallback = pt; }
+    if (solidAt(pt.x, pt.y, f.r, true)) continue;
+    if (d < bd) { bd = d; best = pt; }
+  }
+  return best || fallback;
+}
+function moveToJob(f, j, sp, dt) {
+  if (dist(f, j) <= workReach(j, f)) return true;
+  const pt = pickApproach(f, j);
+  moveTo(f, pt.x, pt.y, sp, dt);
+  return dist(f, j) <= workReach(j, f);
 }
 function wanderAround(f, cx, cy, rad, dt, sp) {
   f.wt -= dt;
@@ -678,7 +722,7 @@ function pickBuildJob(f, night) {
 function onBuilt(b) {
   S.stats.built++;
   floatTxt(b.x, b.y - 40, NICE[b.type] + ' built', '#d6ffb0');
-  if (b.type === 'house') toast(`House built — +${TUNE.houseSlots} worker slots`, 'good');
+  if (b.type === 'house') toast(`House built — +${TUNE.houseSlots} worker slot${TUNE.houseSlots === 1 ? '' : 's'}`, 'good');
   else if (b.type === 'farm') toast('Farm built — a Farmer can work it for coins', 'good');
   else if (b.tool) toast(NICE[b.tool] + ' built — drop coins to stock tools', 'good');
   else if (b.type === 'gate') toast('Gate built — your people can pass, the Pale Host cannot', 'good');
@@ -739,8 +783,7 @@ function updateFolk(dt) {
       if (!f.job) f.job = pickBuildJob(f, night);
       const j = f.job;
       if (j) {
-        const reach = (j.r || 16) + 12;
-        if (dist(f, j) > reach) moveTo(f, j.x - reach * 0.7, j.y + 6, sp, dt);
+        if (!moveToJob(f, j, sp, dt)) { /* still walking */ }
         else {
           f.working = true;
           if (isClearJob(j)) {
@@ -804,18 +847,32 @@ function assignPosts() {
 }
 
 // ---------- phases ----------
-function skipPhase() { if (!S || S.over) return; S.phaseT = 0; }
+function skipPhase() {
+  if (!S || S.over) return;
+  if (S.phase === 'night') startDay();
+  else startNight();
+}
 function startNight() {
-  S.phase = 'night'; S.phaseT = NIGHT; S.chaos = false; S.leader = null;
-  const n = TUNE.waveBase + TUNE.wavePerNight * S.nights + TUNE.wavePerRegion * Math.max(0, owned().length - 1);
+  S.chaos = false; S.leader = null; S.nightSpawned = false; S.bloodMoon = false;
+  const n0 = TUNE.waveBase + TUNE.wavePerNight * S.nights + TUNE.wavePerRegion * Math.max(0, owned().length - 1);
+  // Necromancer only on every 10th day (10, 20, 30…), leading a larger blood-moon wave.
+  const necroNight = S.day > 0 && S.day % 10 === 0;
+  const n = Math.max(0, Math.round(n0 * (necroNight ? (TUNE.necroWaveMul || 2) : 1)));
   const q = [];
   for (let i = 0; i < n; i++) q.push(Math.random() < 0.5 ? 'shambler' : 'skeleton');
-  q.splice(Math.min(2, q.length), 0, 'necro');
+  if (necroNight && q.length) {
+    q.splice(Math.min(2, q.length), 0, 'necro');
+    S.bloodMoon = true;
+  }
+  // An empty wave never starts night — stay in (or return to) day.
+  if (!q.length) { S.phase = 'day'; S.phaseT = DAY; S.spawnQ = []; return; }
+  S.phase = 'night'; S.phaseT = 0;
   S.spawnQ = q; S.spawnGap = Math.min(1.0, 16 / q.length); S.spawnT = 0.5;
   pickFocus();
   pickWaveSide();
   S.waveSrc = waveEntryPoint(S.waveSide);
-  toast(`Night ${S.nights + 1} — the Pale Host marches!`, 'bad');
+  if (necroNight) toast(`Night ${S.nights + 1} — the Necromancer leads a Blood Moon!`, 'bad');
+  else toast(`Night ${S.nights + 1} — the Pale Host marches!`, 'bad');
 }
 function pickWaveSide() {
   const r = rand();
@@ -842,17 +899,19 @@ function pickFocus() {
   o.sort((a, b) => score(a) - score(b)); S.focus = o[0].id;
 }
 function startDay() {
-  S.phase = 'day'; S.phaseT = DAY; S.nights++; S.day++; S.spawnQ = [];
+  S.phase = 'day'; S.phaseT = DAY; S.nights++; S.day++; S.spawnQ = []; S.nightSpawned = false;
   for (const u of S.undead) S.fx.push({ k: 'puff', x: u.x, y: u.y, t: 0.6, t0: 0.6 });
   S.undead = []; S.leader = null; S.chaos = false;
   S.monarch.hp = Math.min(S.monarch.max, S.monarch.hp + 40);
+  S.bloodMoon = false;
   toast(`Dawn! Night ${S.nights} survived — the dead crumble`, 'good');
+  if (S.day % 10 === 9) toast('The Necromancer comes tomorrow night', 'bad');
 }
 function raiseDead(n) {
   const s = UNDEAD.skeleton;
   const u = { type: 'undead', kind: 'skeleton', x: clamp(n.x + (Math.random() - .5) * 50, 10, W - 10), y: clamp(n.y + (Math.random() - .5) * 50, 10, H - 10),
     r: s.r, hp: s.hp, max: s.hp, speed: s.speed, dmg: s.dmg, cd: 0.5, tgt: null, rt: 0, jit: (Math.random() - .5) };
-  S.undead.push(u); S.stats.spawned++; S.stats.raised++;
+  S.undead.push(u); S.stats.spawned++; S.stats.raised++; S.nightSpawned = true;
   S.fx.push({ k: 'puff', x: u.x, y: u.y, t: 0.5, t0: 0.5 });
 }
 function spawnUndead(kind) {
@@ -860,7 +919,7 @@ function spawnUndead(kind) {
   const s = UNDEAD[kind];
   const u = { type: 'undead', kind, x: clamp(src.x + (rand() - .5) * 120, 10, W - 10), y: clamp(src.y + (rand() - .5) * 120, 10, H - 10),
     r: s.r, hp: s.hp, max: s.hp, speed: s.speed * (0.9 + rand() * 0.2), dmg: s.dmg, cd: 0, tgt: null, rt: 0, jit: (rand() - .5) };
-S.undead.push(u); S.stats.spawned++;
+  S.undead.push(u); S.stats.spawned++; S.nightSpawned = true;
   if (kind === 'necro') { S.leader = u; toast('A Necromancer leads this wave!', 'bad'); }
 }
 
@@ -992,11 +1051,18 @@ function update(dt) {
   if (S.over) return;
   followCam(dt);
   edgeScrollWall(dt);
-  S.t += dt; S.phaseT -= dt;
-  if (S.phaseT <= 0) { if (S.phase === 'day') startNight(); else startDay(); }
-  if (S.phase === 'day') { S.trickle += dt; if (S.trickle >= TUNE.trickleEvery) { S.trickle -= TUNE.trickleEvery; S.coins += owned().length; } }
+  S.t += dt;
+  if (S.phase === 'day') {
+    S.phaseT -= dt;
+    if (S.phaseT <= 0) startNight();
+    S.trickle += dt; if (S.trickle >= TUNE.trickleEvery) { S.trickle -= TUNE.trickleEvery; S.coins += owned().length; }
+  } else if (S.phase === 'night') {
+    // Dawn only when the wave has actually started (or was empty — startNight never enters)
+    // and every queued and living host, including necro-raised skeletons, is gone.
+    if (S.nightSpawned && !S.spawnQ.length && !S.undead.length) startDay();
+    if (S.spawnQ.length) { S.spawnT -= dt; if (S.spawnT <= 0) { S.spawnT = S.spawnGap; spawnUndead(S.spawnQ.shift()); } }
+  }
   if (S.dropHold) { S.dropT -= dt; if (S.dropT <= 0) { S.dropT = 0.22; dropCoin(); } }
-  if (S.phase === 'night' && S.spawnQ.length) { S.spawnT -= dt; if (S.spawnT <= 0) { S.spawnT = S.spawnGap; spawnUndead(S.spawnQ.shift()); } }
   const m = S.monarch;
   // movement
   let dx = 0, dy = 0;
@@ -2617,18 +2683,12 @@ function drawRock(rk) {
 function drawClearMark(o) {
   const lift = o.kind === 'rock' ? 22 : 36;
   const busy = S.folk.some(f => f.role === 'builder' && f.job === o && f.working);
-  const cost = clearCost(o), paid = o.paid || 0;
   if (!busy) blit(Art.orderMark, o.x - 12, o.y + 2, { sc: 1 });
-  // Coin glyphs on the sign, same readable payment language as a tool stand.
-  for (let i = 0; i < cost; i++) {
-    ctx.globalAlpha = i < paid ? 1 : 0.32;
-    ctx.drawImage(Art.coin.c, o.x - (cost * 10) / 2 + i * 10, o.y - lift - 2, 10, 10);
-  }
+  // Small axe / pick (hammer tool sprite) — paid on the mark tap, no drop-coin sign.
+  const ic = Art.tool && Art.tool.hammer;
+  if (ic) ctx.drawImage(ic.c, o.x - 8, o.y - lift - 4, 16, 16);
   ctx.globalAlpha = 1;
   if ((o.prog || 0) > 0) bar(o.x, o.y + 10, 36, o.prog, '#8fd06a');
-  if (!clearPaid(o)) placeTag('Drop ' + (cost === 1 ? '1 coin' : cost + ' coins'), o.x, o.y + lift, 11, '#ffe6b0', '#e6c27a');
-  else if (!S.folk.some(f => f.role === 'builder')) placeTag('Needs a Builder', o.x, o.y + 24, 11, '#ffe6b0', '#e6c27a');
-  else if (!busy && !(o.prog > 0)) placeTag((o.kind === 'rock' ? 'Break' : 'Chop') + ' · waiting', o.x, o.y + lift, 11, '#fff6e4', null);
 }
 function gateOpen(b) {
   if (!b || b.owner === 'pale' || b.built < 1) return false;
@@ -3341,8 +3401,7 @@ function render() {
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
   for (const st of S.stands) if (st.built >= 1) drawStockBadge(st);
-  for (const t of S.trees) if (t.marked) drawClearBadge(t);
-  for (const rk of S.rocks) if (rk.marked) drawClearBadge(rk);
+  // Payment is taken from the purse on the mark tap; no lingering 0/1 count badge.
   drawWallCostBadge();
   for (const g of S.guardians) {
     const e = edgeOf(g.x, g.y);
@@ -3397,8 +3456,13 @@ function setVal(id, key, v) {
 }
 function drawHud() {
   setVal('hCoins', 'c', String(S.coins));
-  const t = Math.max(0, Math.ceil(S.phaseT)), mm = (t / 60) | 0, ss = String(t % 60).padStart(2, '0');
-  setVal('hPhase', 'p', (S.phase === 'day' ? 'Day ' : 'Night ') + mm + ':' + ss);
+  if (S.phase === 'day') {
+    const t = Math.max(0, Math.ceil(S.phaseT)), mm = (t / 60) | 0, ss = String(t % 60).padStart(2, '0');
+    setVal('hPhase', 'p', 'Day ' + mm + ':' + ss);
+  } else {
+    const left = (S.undead ? S.undead.length : 0) + (S.spawnQ ? S.spawnQ.length : 0);
+    setVal('hPhase', 'p', (S.bloodMoon ? 'Blood Moon · ' : 'Night · ') + left);
+  }
   $('hPhase').classList.toggle('night', S.phase === 'night');
   setVal('hNights', 'n', String(S.nights));
   setVal('hRegions', 'r', owned().length + '/' + S.regions.length);
