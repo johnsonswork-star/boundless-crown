@@ -19,9 +19,9 @@ const TUNE = {
   vagrantEvery: 18, vagrantMax: 4, vagrantStart: 2,
   buildTime: { wall: 4, tower: 8, farm: 5, house: 6 }, repairRate: 14,
   farmEvery: 5, farmCoins: 1,    // a worked farm pays farmCoins every farmEvery s, by day
-  coreHome: 280, coreCaptured: 160, coreRetaken: 130, coreKeep: 320,
-  waveBase: 3, wavePerNight: 5, wavePerRegion: 2,
-  necroRaiseEvery: 6, leaderDmg: 1.25,
+  coreHome: 280, coreCaptured: 150, coreRetaken: 130, coreKeep: 320,
+  waveBase: 2, wavePerNight: 7, wavePerRegion: 2,
+  necroRaiseEvery: 5, leaderDmg: 1.25,
   guardianLeash: 220, rallyRange: 280, folkSpeed: 72,
 };
 const DEBUG = new URLSearchParams(location.search).get('debug') === '1';
@@ -33,8 +33,8 @@ const UNDEAD = {
 };
 const BLD = {
   wall:  { hp: 160, r: 16 },
-  tower: { hp: 120, r: 16, range: 230, cd: 0.7, dmg: 14 },
-  fort:  { hp: 300, r: 22, range: 250, cd: 0.6, dmg: 18 },
+  tower: { hp: 120, r: 16, range: 220, cd: 0.8, dmg: 12 },
+  fort:  { hp: 260, r: 22, range: 220, cd: 0.8, dmg: 13 },
   farm:  { hp: 70, r: 24 },
   house: { hp: 130, r: 18 },
 };
