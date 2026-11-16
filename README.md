@@ -39,9 +39,9 @@ The look is original and procedural (baked terrain plus pre-rendered canvas spri
 - **Day** is a calm countryside. Owned land has a warm gold wash and a blue banner rim, wild land stays neutral olive, and Pale Host land is a grey-green fog with bare trees.
 - **Night** eases in over a couple of seconds. A blue-purple veil covers the map, with warm light around the monarch, towers, forts, and keeps. Pale fires and the necromancer's staff burn green.
 - **Buildings** are extruded stone and timber: wall segments, a roofed tower with an archer, the larger Encampment Fort, and a ruined Keep. Pale-occupied copies are ghostly grey with skull banners, not a flat recolor.
-- **Units** are readable tokens: the crowned monarch on horseback with a cape, archers in green, a horned guardian, the taller Pale Warden, hunched shamblers, skeletons, and a robed necromancer.
+- **Units** are readable tokens: the crowned monarch on horseback with a cape, archers in green, a horned guardian, the taller Pale Warden, hunched shamblers in ragged tunics, bone skeletons with rusty blades, and a taller hooded necromancer with a violet orb. Pale Host sprites keep a dark rim so they read on day grass and through the night veil; night no longer covers them with filled ovals.
 - **Effects** include arrow trails, a sword arc, hit flashes, death puffs, coin pops, and a capture ring.
-- Terrain is cached on an offscreen canvas. Sprites, fog, and night lights are pre-rendered so the frame avoids per-entity shadow blurs and gradients. HUD icons are inline SVG, not emoji, so they still show on phones that don't render emoji.
+- Terrain is cached on an offscreen canvas. Sprites, fog, and night lights are pre-rendered so the frame avoids per-entity shadow blurs and gradients. HUD, build-menu, and bottom-bar icons are chunky filled inline SVG (dark rim and a soft highlight), not emoji, so they still show on phones that don't render emoji. Tool-stand badges use the matching bow, hammer, and scythe.
 
 ## Placeholder / stubbed
 - There is no audio and no save.
