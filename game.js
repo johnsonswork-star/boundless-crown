@@ -381,6 +381,7 @@ function setBuild(t) {
   else $('hint').textContent = `Tap your land to order a ${NICE[t]} · ${COST[t]} coins · drag to look around`;
 }
 function isStandType(t) { return !!TOOL[t]; }
+function rackedToolCount(st) { return Math.max(0, Math.min((st && st.tools) || 0, TUNE.standMax)); }
 function setZoomAt(z, sx, sy) {
   const before = s2w(sx, sy);
   zoom = z;
@@ -2928,7 +2929,6 @@ function drawScaffold(b) {
   if (!busy && !b.demo) blit(Art.orderMark, b.x - 14 * sc, b.y + 2, { sc: 0.9 });
   bar(b.x, b.y + 10, 40, b.built, '#8fd06a');
   if (!S.folk.some(f => f.role === 'builder')) placeTag('Needs a Builder', b.x, b.y + 26, 11, '#ffe6b0', '#e6c27a');
-  else if (!busy && !b.demo) placeTag(NICE[b.type] + ' · waiting', b.x, b.y + 26, 11, '#fff6e4', null);
   if (b.demo) drawDemoMark(b);
 }
 function drawDemoMark(b) {
@@ -2989,7 +2989,6 @@ function drawBuilding(b) {
   }
   flashAt(b.x, b.y - 12, b.r * 0.7, b.r * 0.8, b.flash);
   if (b.hp < b.max) bar(b.x, b.y + 8, 36, b.hp / b.max, pale ? '#7dce6a' : '#e2a23a');
-  if (b.type === 'fort') placeTag('FORT', b.x, b.y + 18, 11, '#fff6e4', pale ? '#9ddea8' : '#e6c27a');
   if (b.demo) drawDemoMark(b);
 }
 function drawCore(k) {
@@ -3089,7 +3088,15 @@ function drawStand(st) {
   shadow(st.x, st.y + 2, 18, 5);
   blit(Art.stand[st.tool] || Art.stand.bow, st.x, st.y);
   const ic = Art.tool[st.tool];
-  for (let i = 0; i < st.tools; i++) ctx.drawImage(ic.c, st.x - 15 + i * 10, st.y - 22, 12, 13.5);
+  const n = rackedToolCount(st);
+  // One tool sprite per stocked item, hanging on the rack. Empty stand = bare rack; no count bubble.
+  if (ic && n) {
+    const w = 16, h = 18, gap = 13;
+    const x0 = st.x - ((n - 1) * gap) / 2 - w / 2;
+    const y = st.y - 31;
+    for (let i = 0; i < n; i++) ctx.drawImage(ic.c, x0 + i * gap, y, w, h);
+  }
+  st._racked = n;
   const c = TOOL[st.tool].cost;
   if (st.paid > 0) for (let i = 0; i < c; i++) {
     ctx.globalAlpha = i < st.paid ? 1 : 0.3;
@@ -3119,28 +3126,6 @@ function drawClearBadge(o) {
   ctx.stroke();
   if (Art.coin) ctx.drawImage(Art.coin.c, x + pad, y + (h - ih) / 2, ih, ih);
   ctx.fillStyle = done ? '#e9fff2' : '#fff6e4';
-  ctx.fillText(txt, x + pad + ih + 5, y + h / 2 + 0.5);
-}
-function drawStockBadge(st) {
-  if (!st || st.built < 1) return;
-  const p = w2s(st.x, st.y - 28);
-  const size = 16, pad = 7, ih = 16;
-  const txt = String(st.tools);
-  ctx.font = `800 ${size}px "Segoe UI", system-ui, sans-serif`;
-  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  const tw = ctx.measureText(txt).width;
-  const w = pad + ih + 5 + tw + pad, h = 24;
-  const x = Math.round(p.x - w / 2), y = Math.round(p.y - h / 2);
-  if (y + h < TOP_CHROME - 4 || y > vh - BOT_CHROME + 4 || x + w < 4 || x > vw - 4) return;
-  rrPath(ctx, x, y, w, h, 8);
-  ctx.fillStyle = 'rgba(28,20,14,.88)';
-  ctx.fill();
-  ctx.lineWidth = 2.2;
-  ctx.strokeStyle = st.tools ? '#8ee0b0' : '#e6c27a';
-  ctx.stroke();
-  const ic = Art.tool[st.tool];
-  if (ic) ctx.drawImage(ic.c, x + pad, y + (h - ih) / 2, ih, ih);
-  ctx.fillStyle = st.tools ? '#e9fff2' : '#fff6e4';
   ctx.fillText(txt, x + pad + ih + 5, y + h / 2 + 0.5);
 }
 function drawWallGhosts() {
@@ -3586,7 +3571,6 @@ function render() {
     const lift = r.core && r.core.keep ? 108 : 86;
     placeTag(r.name, r.x, r.y - lift, 18, '#fff8ee', null);
     placeTag(st, r.x, r.y - lift + 24, 12, r.owner === 'player' ? '#d6e6ff' : r.owner === 'pale' ? '#d7f0cc' : '#ffe6b0', r.owner === 'player' ? '#7eb0ee' : r.owner === 'pale' ? '#9ddea8' : '#e6c27a');
-    if (r.core && r.core.keep) placeTag('KEEP', r.x, r.y + 22, 11, '#fff6e4', '#e6c27a');
   }
   for (const g of S.guardians) {
     if (!vis(g.x, g.y) || !edgeOf(g.x, g.y).on) continue;
@@ -3623,7 +3607,7 @@ function render() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
-  for (const st of S.stands) if (st.built >= 1) drawStockBadge(st);
+  // Tool stock is shown as racked sprites on the stand, not a count bubble.
   // Payment is taken from the purse on the mark tap; no lingering 0/1 count badge.
   drawWallCostBadge();
   for (const g of S.guardians) {
@@ -3739,6 +3723,7 @@ window.__bc = {
   setWallDrag(x0, y0, x1, y1) { wallDrag = { x0, y0, x1, y1, plan: planWallLine(x0, y0, x1, y1) }; return wallDrag.plan; },
   clearWallDrag() { wallDrag = null; },
   findCampSpot, nearestCampSpot, refreshCamps, settleVagrants,
+  stockBadge: false, rackedToolCount,
   teleport(x, y) { S.monarch.x = x; S.monarch.y = y; lookX = x; lookY = y; },
   coins(n) { S.coins += n; }, heal() { S.monarch.hp = S.monarch.max; },
   forceLose(id) { const r = S.regions[id]; if (r && r.core) damage(r.core, r.core.hp + 1); },
