@@ -5,7 +5,7 @@
 const W = 2400, H = 2400, CX = W / 2, CY = H / 2;
 const DAY = 60, NIGHT = 45, CELL = 8, GW = W / CELL, GH = H / CELL;
 const COST = { wall: 4, tower: 12, farm: 8, house: 6 };
-const NICE = { wall: 'Wall', tower: 'Tower', farm: 'Farm', house: 'House', fort: 'Fort', gate: 'Gate', bow: 'Bow stand', hammer: 'Hammer stand', scythe: 'Scythe stand', clear: 'Clear' };
+const NICE = { wall: 'Wall', tower: 'Tower', farm: 'Farm', house: 'House', fort: 'Fort', gate: 'Gate', bow: 'Bow stand', hammer: 'Hammer stand', scythe: 'Scythe stand', clear: 'Clear', demolish: 'Demolish' };
 const TOOL = {
   bow:    { cost: 4, role: 'archer',  label: 'Bow' },
   hammer: { cost: 3, role: 'builder', label: 'Hammer' },
@@ -33,6 +33,8 @@ const TUNE = {
   treeCost: 1, rockCost: 2, // deducted from the purse on the mark tap (net profit vs treeCoin/rockCoin)
   clearTime: { tree: 4, rock: 5 }, // seconds for a Builder to chop or break
   clearMarkRange: 170, // monarch must be this close to mark a tree or rock
+  demoTime: 4, // seconds for a Builder to tear down a marked building
+  demoMarkRange: 170, // monarch must be this close to mark a building for demolish
 };
 const DEBUG = new URLSearchParams(location.search).get('debug') === '1';
 const NAMES = ['Crownhold', 'Ashford', 'Briarmoor', 'Coldwater', 'Duskfen', 'Elmreach', 'Frostgate', 'Gloamwood'];
@@ -314,6 +316,7 @@ $('btnRestart').addEventListener('click', () => newGame());
 
 function setBuild(t) {
   if (!S) return;
+  if (S.build === 'demolish' && t !== 'demolish') unmarkAllDemo();
   wallDrag = null;
   S.build = t; S.mapDirty = true;
   const bb = $('btnBuild');
@@ -324,6 +327,7 @@ function setBuild(t) {
   else if (t === 'wall') $('hint').textContent = `Drag to lay a Wall · ${COST.wall} coins each · drag to a screen edge to scroll, two fingers to look around · Cancel to stop`;
   else if (t === 'gate') $('hint').textContent = `Tap to place a Gate, or tap a Wall to swap · ${COST.gate} coins · drag to look around`;
   else if (t === 'clear') $('hint').textContent = `Tap a tree or rock near you to clear it · ${TUNE.treeCost} coin for a tree, ${TUNE.rockCost} for a rock, taken from your purse · tap again to cancel and refund · trees drop ${TUNE.treeCoin} coins, rocks ${TUNE.rockCoin} · drag to look around`;
+  else if (t === 'demolish') $('hint').textContent = `Tap a building near you to mark it for demolish — free, no refund · tap again or Cancel to unmark · the Keep cannot be demolished · drag to look around`;
   else $('hint').textContent = `Tap your land to order a ${NICE[t]} · ${COST[t]} coins · drag to look around`;
 }
 function isStandType(t) { return !!TOOL[t]; }
@@ -373,6 +377,7 @@ function onTap(sx, sy) {
   if (S.over) return;
   const w = s2w(sx, sy);
   if (S.build === 'clear') return tryMarkDecor(w.x, w.y, true);
+  if (S.build === 'demolish') return tryMarkDemo(w.x, w.y, true);
   if (S.build) return tryPlace(S.build, w.x, w.y);
   if (tryMarkDecor(w.x, w.y, false)) return;
   // tap an enemy to focus it
@@ -433,6 +438,116 @@ function tryMarkDecor(x, y, mode) {
   if (hit.marked) { unmarkClear(hit); return hit; }
   // Truthy even when the player cannot afford it, so the tap is consumed after the toast.
   return markClear(hit) || true;
+}
+function isDemoJob(j) {
+  return !!(j && j.demo && S.buildings.includes(j) && j.owner === 'player' && (j.demoProg || 0) < 1);
+}
+function coreAt(x, y, rad) {
+  let best = null, bd = rad;
+  const pt = { x, y };
+  for (const r of S.regions) {
+    if (!r.core || r.owner !== 'player') continue;
+    const d = dist(r.core, pt) - (r.core.r || 20);
+    if (d < bd) { bd = d; best = r.core; }
+  }
+  return best;
+}
+function bldAt(x, y, rad) {
+  let best = null, bd = rad;
+  const pt = { x, y };
+  for (const b of S.buildings) {
+    if (b.owner !== 'player') continue;
+    const d = dist(b, pt) - (b.r || 16);
+    if (d < bd) { bd = d; best = b; }
+  }
+  return best;
+}
+function unmarkDemo(b) {
+  if (!b || !b.demo) return;
+  b.demo = false; b.demoProg = 0;
+  for (const f of S.folk) if (f.job === b) f.job = null;
+  toast((NICE[b.tool] || NICE[b.type] || 'Building') + ' unmarked');
+}
+function unmarkAllDemo() {
+  if (!S) return;
+  for (const b of S.buildings) if (b.demo) { b.demo = false; b.demoProg = 0; }
+  for (const f of S.folk) if (f.role === 'builder' && f.job && f.job.demo === false) f.job = null;
+}
+function evictToCap() {
+  let over = workers() - housingCap();
+  if (over <= 0) return 0;
+  let n = 0;
+  const evictFolk = pred => {
+    for (const f of S.folk) {
+      if (over <= 0) break;
+      if (f.role === 'vagrant' || !pred(f)) continue;
+      if (f.role === 'farmer' && f.job && f.job.farmer === f) f.job.farmer = null;
+      f.role = 'vagrant'; f.job = null; f.stand = null; f.tx = null; f.state = 'idle';
+      over--; n++;
+    }
+  };
+  evictFolk(f => f.role === 'villager');
+  evictFolk(f => f.role === 'farmer');
+  evictFolk(f => f.role === 'builder' && S.folk.filter(o => o.role === 'builder').length > 1);
+  for (let i = S.archers.length - 1; i >= 0 && over > 0; i--) {
+    const a = S.archers[i];
+    S.archers.splice(i, 1);
+    S.folk.push(mkFolk('vagrant', a.x, a.y));
+    over--; n++;
+  }
+  evictFolk(f => f.role === 'builder');
+  return n;
+}
+function finishDemo(b) {
+  if (!b || !S.buildings.includes(b)) return;
+  const wasHouse = b.type === 'house' && b.owner === 'player';
+  const label = NICE[b.tool] || NICE[b.type] || 'Building';
+  const stock = (b.tool && (b.tools || 0) > 0) ? b.tools : 0;
+  const leftover = (b.tool ? (b.paid || 0) : 0);
+  const coins = (b.tool ? stock * (TOOL[b.tool] ? TOOL[b.tool].cost : 0) + leftover : 0);
+  for (const f of S.folk) {
+    if (f.job === b) { if (b.farmer === f) b.farmer = null; f.job = null; }
+    if (f.stand === b) f.stand = null;
+  }
+  S.buildings.splice(S.buildings.indexOf(b), 1);
+  const si = S.stands.indexOf(b); if (si >= 0) S.stands.splice(si, 1);
+  if (coins) dropLoot(b.x, b.y, coins);
+  S.fx.push({ k: 'puff', x: b.x, y: b.y, t: 0.55, t0: 0.55, big: 1 });
+  floatTxt(b.x, b.y - 36, label + ' gone', '#ffd0c8');
+  if (S.stats) S.stats.demo = (S.stats.demo || 0) + 1;
+  if (wasHouse) {
+    const ev = evictToCap();
+    toast(ev
+      ? `House demolished — ${ev} worker${ev === 1 ? '' : 's'} evicted (no refund)`
+      : 'House demolished — no refund', ev ? 'bad' : '');
+  } else if (b.tool) {
+    toast(coins
+      ? `${label} demolished — ${coins} coin${coins === 1 ? '' : 's'} from leftover stock`
+      : `${label} demolished — no refund`);
+  } else {
+    toast(label + ' demolished — no refund');
+  }
+}
+function tryMarkDemo(x, y, mode) {
+  const rad = Math.max(36, 52 / scale);
+  const core = coreAt(x, y, rad);
+  const b = bldAt(x, y, rad);
+  const coreD = core ? dist(core, { x, y }) - (core.r || 20) : 1e9;
+  const bD = b ? dist(b, { x, y }) - (b.r || 16) : 1e9;
+  if (core && coreD <= bD) {
+    toast('You cannot demolish the Keep', 'bad');
+    return true;
+  }
+  if (!b) { if (mode) toast('Tap a building to demolish it'); return null; }
+  if (dist(b, S.monarch) > (TUNE.demoMarkRange || TUNE.clearMarkRange || 170)) {
+    if (mode) toast('Move closer to mark that', 'bad');
+    return null;
+  }
+  if (b.demo) { unmarkDemo(b); return b; }
+  b.demo = true; b.demoProg = 0;
+  const label = NICE[b.tool] || NICE[b.type] || 'Building';
+  toast(label + ' marked — a Builder will tear it down (no refund)');
+  return b;
 }
 function dropLoot(x, y, n) {
   for (let i = 0; i < n; i++) {
@@ -500,6 +615,7 @@ function placeBld(type, x, y) {
 }
 function tryPlace(type, x, y) {
   if (type === 'clear') return tryMarkDecor(x, y, true);
+  if (type === 'demolish') return tryMarkDemo(x, y, true);
   if (type === 'gate') {
     const hit = S.buildings.find(b => b.type === 'wall' && b.owner === 'player' && dist(b, { x, y }) < (b.r || 16) + 14);
     if (hit) return swapWallForGate(hit);
@@ -702,14 +818,17 @@ function wanderAround(f, cx, cy, rad, dt, sp) {
 }
 function jobValid(j) {
   if (!j) return false;
-  if (isClearJob(j)) return true;
+  if (isClearJob(j) || isDemoJob(j)) return true;
   if (j.type === 'core') { const r = S.regions[j.region]; return r.core === j && r.owner === 'player' && j.hp < j.max; }
   return S.buildings.includes(j) && j.owner === 'player' && (j.built < 1 || j.hp < j.max);
 }
 function pickBuildJob(f, night) {
   let best = null, bd = 1e9;
   const taken = new Set(S.folk.filter(o => o !== f && o.role === 'builder' && o.job).map(o => o.job));
-  for (const b of S.buildings) if (b.owner === 'player' && b.built < 1) {
+  for (const b of S.buildings) if (isDemoJob(b)) {
+    const d = dist(b, f) + (taken.has(b) ? 600 : 0); if (d < bd) { bd = d; best = b; }
+  }
+  for (const b of S.buildings) if (b.owner === 'player' && b.built < 1 && !b.demo) {
     const d = dist(b, f) + (taken.has(b) ? 600 : 0); if (d < bd) { bd = d; best = b; }
   }
   for (const t of S.trees) if (isClearJob(t)) { const d = dist(t, f) + (taken.has(t) ? 600 : 0); if (d < bd) { bd = d; best = t; } }
@@ -779,14 +898,17 @@ function updateFolk(dt) {
       wanderAround(f, ix, iy, 64, dt, sp); continue;
     }
     if (f.role === 'builder') {
-      if (f.job && (!jobValid(f.job) || (night && !isClearJob(f.job) && f.job.built !== 0 && !(f.job.built < 1)))) f.job = null;
+      if (f.job && (!jobValid(f.job) || (night && !isClearJob(f.job) && !isDemoJob(f.job) && f.job.built !== 0 && !(f.job.built < 1)))) f.job = null;
       if (!f.job) f.job = pickBuildJob(f, night);
       const j = f.job;
       if (j) {
         if (!moveToJob(f, j, sp, dt)) { /* still walking */ }
         else {
           f.working = true;
-          if (isClearJob(j)) {
+          if (isDemoJob(j)) {
+            j.demoProg = Math.min(1, (j.demoProg || 0) + dt / (TUNE.demoTime || 4));
+            if (j.demoProg >= 1) { finishDemo(j); f.job = null; }
+          } else if (isClearJob(j)) {
             const kind = decorKind(j);
             j.prog = Math.min(1, (j.prog || 0) + dt / (TUNE.clearTime[kind] || 4));
             if (j.prog >= 1) { finishClear(j); f.job = null; }
@@ -956,7 +1078,10 @@ function damage(e, dmg) {
     S.buildings.splice(S.buildings.indexOf(e), 1);
     const si = S.stands.indexOf(e); if (si >= 0) S.stands.splice(si, 1);
     S.fx.push({ k: 'puff', x: e.x, y: e.y, t: 0.6, t0: 0.6 });
-    if (e.type === 'house' && e.owner === 'player') toast('A House was destroyed — housing reduced', 'bad');
+    if (e.type === 'house' && e.owner === 'player') {
+      const ev = evictToCap();
+      toast(ev ? `A House was destroyed — ${ev} worker${ev === 1 ? '' : 's'} evicted` : 'A House was destroyed — housing reduced', 'bad');
+    }
     else if (e.tool && e.owner === 'player') toast('A tool stand was destroyed', 'bad');
     else if (e.type === 'gate' && e.owner === 'player') toast('A Gate was destroyed', 'bad');
   } else if (e.type === 'archer') {
@@ -2229,6 +2354,29 @@ function paintScaffold(stage) {
   spr.gy = 47;
   return spr;
 }
+function paintDemoMark() {
+  const spr = bake(24, 34, g => {
+    g.fillStyle = '#5a3824';
+    g.fillRect(10.5, 12, 3.2, 20);
+    g.fillStyle = '#3a2218';
+    g.beginPath();
+    if (g.roundRect) g.roundRect(2, 2, 20, 16, 2.2); else g.rect(2, 2, 20, 16);
+    g.fill();
+    g.strokeStyle = '#2a1c10'; g.lineWidth = 1.3;
+    g.beginPath();
+    if (g.roundRect) g.roundRect(2, 2, 20, 16, 2.2); else g.rect(2, 2, 20, 16);
+    g.stroke();
+    g.strokeStyle = '#7a2018'; g.lineWidth = 4.2; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(6, 5.2); g.lineTo(18, 14.8); g.moveTo(18, 5.2); g.lineTo(6, 14.8); g.stroke();
+    g.strokeStyle = '#e15a4a'; g.lineWidth = 2.6;
+    g.beginPath(); g.moveTo(6, 5.2); g.lineTo(18, 14.8); g.moveTo(18, 5.2); g.lineTo(6, 14.8); g.stroke();
+    g.strokeStyle = '#ffd0c8'; g.lineWidth = 1.05;
+    g.beginPath(); g.moveTo(7, 6.2); g.lineTo(16.5, 13.6); g.stroke();
+    ell(g, 12, 32, 6, 2.1, 'rgba(90,60,30,.35)');
+  });
+  spr.gy = 33;
+  return spr;
+}
 function paintOrderMark() {
   const spr = bake(18, 28, g => {
     g.fillStyle = '#6e4328'; g.fillRect(8, 8, 2.2, 18);
@@ -2327,6 +2475,7 @@ function buildArt() {
   Art.farm = { tilled: paintFarm('tilled'), growing: paintFarm('growing'), ripe: paintFarm('ripe'), pale: paintFarm('pale') };
   Art.scaffold = [0, 1, 2].map(paintScaffold);
   Art.orderMark = paintOrderMark();
+  Art.demoMark = paintDemoMark();
   Art.camp = paintCamp();
   Art.coinFrames = [0, 1, 2, 3, 4, 5].map(paintCoinFrame);
   Art.coin = Art.coinFrames[0];
@@ -2722,10 +2871,27 @@ function drawScaffold(b) {
   shadow(b.x, b.y + 2, 16 * sc, 5);
   blit(Art.scaffold[stage], b.x, b.y + 2, { sc });
   const busy = S.folk.some(f => f.role === 'builder' && f.job === b && f.working);
-  if (!busy) blit(Art.orderMark, b.x - 14 * sc, b.y + 2, { sc: 0.9 });
+  if (!busy && !b.demo) blit(Art.orderMark, b.x - 14 * sc, b.y + 2, { sc: 0.9 });
   bar(b.x, b.y + 10, 40, b.built, '#8fd06a');
   if (!S.folk.some(f => f.role === 'builder')) placeTag('Needs a Builder', b.x, b.y + 26, 11, '#ffe6b0', '#e6c27a');
-  else if (!busy) placeTag(NICE[b.type] + ' · waiting', b.x, b.y + 26, 11, '#fff6e4', null);
+  else if (!busy && !b.demo) placeTag(NICE[b.type] + ' · waiting', b.x, b.y + 26, 11, '#fff6e4', null);
+  if (b.demo) drawDemoMark(b);
+}
+function drawDemoMark(b) {
+  if (!b || !b.demo) return;
+  const busy = S.folk.some(f => f.role === 'builder' && f.job === b && f.working);
+  const lift = b.type === 'wall' || b.type === 'gate' ? 18 : b.type === 'farm' ? 22 : b.tool ? 28 : 30;
+  if (Art.demoMark) blit(Art.demoMark, b.x + 10, b.y - lift + 16, { sc: 1.15 });
+  // A second, larger X so the mark stays readable at phone distance / zoomed out.
+  const s = 11;
+  ctx.strokeStyle = '#7a2018'; ctx.lineWidth = 4.4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(b.x - s, b.y - lift - s); ctx.lineTo(b.x + s, b.y - lift + s);
+  ctx.moveTo(b.x + s, b.y - lift - s); ctx.lineTo(b.x - s, b.y - lift + s); ctx.stroke();
+  ctx.strokeStyle = '#e15a4a'; ctx.lineWidth = 2.6;
+  ctx.beginPath(); ctx.moveTo(b.x - s, b.y - lift - s); ctx.lineTo(b.x + s, b.y - lift + s);
+  ctx.moveTo(b.x + s, b.y - lift - s); ctx.lineTo(b.x - s, b.y - lift + s); ctx.stroke();
+  if ((b.demoProg || 0) > 0) bar(b.x, b.y + 12, 40, b.demoProg, '#e15a4a');
+  else if (!busy) { /* the red X is the mark — no extra text bubble */ }
 }
 function drawBuilding(b) {
   if (b.built < 1) return drawScaffold(b);
@@ -2738,6 +2904,7 @@ function drawBuilding(b) {
     blit(spr, b.x, b.y + 6);
     if (b.hp < b.max) bar(b.x, b.y + 12, 36, b.hp / b.max, pale ? '#7dce6a' : '#e2a23a');
     if (!pale && !(b.farmer && S.folk.includes(b.farmer))) placeTag('Needs a Farmer', b.x, b.y + 22, 11, '#ffe6b0', '#e6c27a');
+    if (b.demo) drawDemoMark(b);
     return;
   }
   const spr = buildingSpr(b);
@@ -2769,6 +2936,7 @@ function drawBuilding(b) {
   flashAt(b.x, b.y - 12, b.r * 0.7, b.r * 0.8, b.flash);
   if (b.hp < b.max) bar(b.x, b.y + 8, 36, b.hp / b.max, pale ? '#7dce6a' : '#e2a23a');
   if (b.type === 'fort') placeTag('FORT', b.x, b.y + 18, 11, '#fff6e4', pale ? '#9ddea8' : '#e6c27a');
+  if (b.demo) drawDemoMark(b);
 }
 function drawCore(k) {
   const x = k.x, y = k.y, keep = !!k.keep;
@@ -2874,6 +3042,7 @@ function drawStand(st) {
     ctx.drawImage(Art.coin.c, st.x - (c * 9) / 2 + i * 9, st.y - 46, 9, 9);
   }
   ctx.globalAlpha = 1;
+  if (st.demo) drawDemoMark(st);
 }
 function drawClearBadge(o) {
   if (!o || !o.marked) return;
@@ -3511,7 +3680,7 @@ window.__bc = {
   get lookY() { return lookY; }, set lookY(v) { lookY = v; },
   get lookFree() { return lookFree; }, set lookFree(v) { lookFree = !!v; },
   setBuild, setZoomAt, planWallLine, commitWallLine, placeBlocked, swapWallForGate, gateOpen, solidAt, tryMove,
-  decorAt, markClear, tryMarkDecor, finishClear,
+  decorAt, markClear, tryMarkDecor, finishClear, tryMarkDemo, finishDemo, unmarkDemo,
   get wallDrag() { return wallDrag; },
   setWallDrag(x0, y0, x1, y1) { wallDrag = { x0, y0, x1, y1, plan: planWallLine(x0, y0, x1, y1) }; return wallDrag.plan; },
   clearWallDrag() { wallDrag = null; },
