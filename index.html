@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#101418">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Boundless Crown — prototype</title>
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="row">
+    <span id="hCoins" class="pill">🪙 0</span>
+    <span id="hPhase" class="pill">☀ Day 1:00</span>
+    <span id="hNights" class="pill">🌙 0</span>
+    <span id="hRegions" class="pill">🏰 1/7</span>
+  </div>
+  <div class="row">
+    <div id="hpWrap"><div id="hpBar"></div><span id="hpText">100</span></div>
+    <button id="btnSkip" class="dbg" type="button">⏭ Night</button>
+  </div>
+</div>
+<div id="toasts"></div>
+<div id="hint"></div>
+<div id="bar">
+  <button data-act="wall" type="button">🧱<b>Wall</b><i>5</i></button>
+  <button data-act="tower" type="button">🗼<b>Tower</b><i>15</i></button>
+  <button data-act="archer" type="button">🏹<b>Archer</b><i>10</i></button>
+  <button data-act="cancel" type="button">✖<b>Cancel</b><i>&nbsp;</i></button>
+</div>
+<div id="over" hidden>
+  <div class="card">
+    <h1 id="overTitle">The Crown has fallen</h1>
+    <p id="overStats"></p>
+    <button id="btnRestart" type="button">Restart</button>
+  </div>
+</div>
+<script src="game.js?v=1"></script>
+</body>
+</html>
