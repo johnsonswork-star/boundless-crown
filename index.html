@@ -3,33 +3,72 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#101418">
+<meta name="theme-color" content="#241910">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>Boundless Crown — prototype</title>
-<link rel="stylesheet" href="style.css?v=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23241910'/%3E%3Cpath fill='%23f0c14a' d='M3 12.2 4.2 6.2 8 9.1 11.8 6.2 13 12.2z'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
+<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <symbol id="i-coin" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="2.4"/>
+    <path d="M12 7v10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M9.1 9.3c.7-.9 5.1-.9 5.8 0M9.1 14.7c.7.9 5.1.9 5.8 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="4" fill="currentColor"/>
+    <path d="M12 2.4v2.6M12 19v2.6M2.4 12h2.6M19 12h2.6M5.1 5.1l1.9 1.9M17 17l1.9 1.9M18.9 5.1 17 7M7 17l-1.9 1.9" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24">
+    <path fill="currentColor" d="M14.2 2.8a8.4 8.4 0 1 0 7 13.6A7.1 7.1 0 0 1 14.2 2.8z"/>
+  </symbol>
+  <symbol id="i-castle" viewBox="0 0 24 24">
+    <path fill="currentColor" d="M3 20.5V9.5l3.2-2v2.2L9.5 6l3.3 3.7V7.5l3.2 2V20.5H3zm4.1-2.2h2.3v-3.2H7.1v3.2zm6.2 0h2.3v-3.2h-2.3v3.2z"/>
+  </symbol>
+  <symbol id="i-crown" viewBox="0 0 24 24">
+    <path fill="currentColor" d="M3.2 17.6 5.1 8.2 9.4 12 12 5.2 14.6 12l4.3-3.8 1.9 9.4H3.2z"/>
+  </symbol>
+  <symbol id="i-wall" viewBox="0 0 24 24">
+    <path fill="currentColor" d="M2.5 4.5h8v5h-8v-5zm11 0h8v5h-8v-5zM2.5 11h5v4.5h-5V11zm6.5 0h12v4.5H9V11zM2.5 17h8v4h-8v-4zm9.5 0h9.5v4H12v-4z"/>
+  </symbol>
+  <symbol id="i-tower" viewBox="0 0 24 24">
+    <path fill="currentColor" d="M12 1.8 19.2 10H4.8L12 1.8zM6.5 10.6h11v9.6h-11v-9.6zM9.2 15.2h5.6v5h-5.6v-5z"/>
+  </symbol>
+  <symbol id="i-bow" viewBox="0 0 24 24">
+    <path d="M7 3.5c5.2 2.6 5.2 14.4 0 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M7 3.5 9.2 12 7 20.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M9 12h9.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M16.2 9.6 20.2 12l-4 2.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-x" viewBox="0 0 24 24">
+    <path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-skip" viewBox="0 0 24 24">
+    <path fill="currentColor" d="M4 5.5 12.2 12 4 18.5V5.5zm8.2 0L20.4 12l-8.2 6.5V5.5z"/>
+  </symbol>
+</svg>
 <canvas id="c"></canvas>
 <div id="hud">
   <div class="row">
-    <span id="hCoins" class="pill">🪙 0</span>
-    <span id="hPhase" class="pill">☀ Day 1:00</span>
-    <span id="hNights" class="pill">🌙 0</span>
-    <span id="hRegions" class="pill">🏰 1/7</span>
+    <span id="hCoins" class="pill"><svg class="ico gold" viewBox="0 0 24 24"><use href="#i-coin"/></svg><span class="val">0</span></span>
+    <span id="hPhase" class="pill"><svg class="ico sun gold" viewBox="0 0 24 24"><use href="#i-sun"/></svg><svg class="ico moon gold" viewBox="0 0 24 24"><use href="#i-moon"/></svg><span class="val">Day 1:00</span></span>
+    <span id="hNights" class="pill"><svg class="ico gold" viewBox="0 0 24 24"><use href="#i-moon"/></svg><span class="val">0</span></span>
+    <span id="hRegions" class="pill"><svg class="ico gold" viewBox="0 0 24 24"><use href="#i-castle"/></svg><span class="val">1/7</span></span>
   </div>
   <div class="row">
-    <div id="hpWrap"><div id="hpBar"></div><span id="hpText">100</span></div>
-    <button id="btnSkip" class="dbg" type="button">⏭ Night</button>
+    <div id="hpWrap"><div id="hpBar"></div><span id="hpText"><svg class="ico gold" viewBox="0 0 24 24"><use href="#i-crown"/></svg><span class="val">120 / 120</span></span></div>
+    <button id="btnSkip" class="dbg" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-skip"/></svg><span class="val">Night</span></button>
   </div>
 </div>
 <div id="toasts"></div>
 <div id="hint"></div>
 <div id="bar">
-  <button data-act="wall" type="button">🧱<b>Wall</b><i>5</i></button>
-  <button data-act="tower" type="button">🗼<b>Tower</b><i>15</i></button>
-  <button data-act="archer" type="button">🏹<b>Archer</b><i>10</i></button>
-  <button data-act="cancel" type="button">✖<b>Cancel</b><i>&nbsp;</i></button>
+  <button data-act="wall" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-wall"/></svg><b>Wall</b><i><svg class="ico" viewBox="0 0 24 24"><use href="#i-coin"/></svg>5</i></button>
+  <button data-act="tower" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-tower"/></svg><b>Tower</b><i><svg class="ico" viewBox="0 0 24 24"><use href="#i-coin"/></svg>15</i></button>
+  <button data-act="archer" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-bow"/></svg><b>Archer</b><i><svg class="ico" viewBox="0 0 24 24"><use href="#i-coin"/></svg>10</i></button>
+  <button data-act="cancel" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-x"/></svg><b>Cancel</b><i>&nbsp;</i></button>
 </div>
 <div id="over" hidden>
   <div class="card">
@@ -38,6 +77,6 @@
     <button id="btnRestart" type="button">Restart</button>
   </div>
 </div>
-<script src="game.js?v=1"></script>
+<script src="game.js?v=2"></script>
 </body>
 </html>
