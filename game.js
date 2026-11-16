@@ -1059,9 +1059,9 @@ function paintMonarch(frame) {
   spr.gy = 48;
   return spr;
 }
-function paintArcher(frame) {
+function paintArcher(frame, rally) {
   const spr = bake(30, 34, g => {
-    const step = frame ? 2 : 0;
+    const step = frame > 0 ? (frame === 2 ? -1.4 : 2.2) : 0;
     g.fillStyle = '#5c4030';
     g.fillRect(10, 24, 3, 8);
     g.fillRect(16, 24 - step, 3, 8 + step);
@@ -1072,6 +1072,13 @@ function paintArcher(frame) {
     ell(g, 16.5, 21, 3, 5, '#4f7a34');
     g.fillStyle = '#3e74c8';
     g.fillRect(11, 18, 7, 2.2);
+    if (rally) {
+      g.fillStyle = '#f0c14a';
+      g.beginPath(); g.moveTo(11, 16); g.lineTo(18, 22); g.lineTo(16, 23); g.lineTo(9, 17); g.fill();
+      g.fillStyle = '#3e74c8';
+      g.beginPath(); g.moveTo(6, 14); g.lineTo(6, 6); g.lineTo(12, 9); g.closePath(); g.fill();
+      g.strokeStyle = '#6b4630'; g.lineWidth = 1; g.beginPath(); g.moveTo(6, 18); g.lineTo(6, 6); g.stroke();
+    }
     g.fillStyle = '#8b5a32';
     g.fillRect(8, 15, 2.4, 7);
     g.strokeStyle = '#f0c14a';
@@ -1244,53 +1251,86 @@ function paintNecro(frame) {
 }
 
 
-// ---- new Kingdom-style entities (placeholder art in the same procedural style; see README art requests) ----
-const FOLK_STYLE = {
-  vagrant:  { tunic: '#8f8676', dark: '#6a6256', hood: '#7a6f60', skin: '#d9b48f' },
-  villager: { tunic: '#e4d2a8', dark: '#bfa97c', hood: '#a07850', skin: '#e6b898' },
-  builder:  { tunic: '#e0874a', dark: '#b4602c', hood: '#f0c14a', skin: '#e6b898' },
-  farmer:   { tunic: '#b8c25a', dark: '#8a9440', hood: '#e8d27a', skin: '#e6b898' },
-};
-function paintFolk(role, frame) {
-  const c = FOLK_STYLE[role];
+// ---- Kingdom workers, stands, farms, houses, scaffolds, coins, camp ----
+function folkLegs(g, step) {
+  g.fillStyle = '#6b4a32';
+  g.fillRect(9.5, 23, 3.6, 8);
+  g.fillRect(16, 23 - step, 3.6, 8 + step);
+  g.fillStyle = '#2c2118';
+  g.fillRect(9.2, 30.2, 4, 2);
+  g.fillRect(15.7, 30.2 - Math.max(0, step) * 0.15, 4, 2);
+}
+function folkHood(g, x, y, col) {
+  g.fillStyle = col;
+  g.beginPath();
+  g.arc(x, y, 4.3, Math.PI * 1.02, Math.PI * 1.98);
+  g.quadraticCurveTo(x + 5, y - 5, x, y - 6.4);
+  g.quadraticCurveTo(x - 5, y - 5, x - 4.2, y);
+  g.fill();
+}
+function paintFolk(role, pose) {
   const spr = bake(30, 34, g => {
-    const step = frame ? 2 : 0, hunch = role === 'vagrant' ? 1.5 : 0;
-    g.fillStyle = '#5c4030';
-    g.fillRect(10, 24, 3, 8);
-    g.fillRect(16, 24 - step, 3, 8 + step);
-    g.fillStyle = '#3a2a1c';
-    g.fillRect(10, 31, 3.2, 1.6);
-    g.fillRect(16, 31, 3.2, 1.6);
-    ell(g, 14 + hunch, 20, 6, 6.5, c.tunic);
-    ell(g, 16.5 + hunch, 21, 3, 5, c.dark);
-    g.fillStyle = '#6b4630';
-    g.fillRect(9 + hunch, 22, 10, 1.6);
-    disc(g, 14 + hunch * 1.6, 11 + hunch, 3.5, c.skin);
-    if (role === 'builder') { // straw hat
-      ell(g, 14, 9, 6, 1.8, c.hood); ell(g, 14, 7.6, 3.4, 2.6, c.hood);
-    } else if (role === 'farmer') { // wide sun hat
-      ell(g, 14, 9, 7, 2, c.hood); ell(g, 14, 7.4, 3.6, 2.6, '#d4b85a');
-    } else { // hood
-      g.fillStyle = c.hood;
-      g.beginPath(); g.arc(14 + hunch * 1.6, 11 + hunch, 3.9, Math.PI * 1.05, Math.PI * 1.95); g.quadraticCurveTo(18.5, 6 + hunch, 14 + hunch, 4.4 + hunch); g.quadraticCurveTo(9.5, 6, 10, 11 + hunch); g.fill();
-    }
-    disc(g, 15.3 + hunch * 1.6, 11.2 + hunch, 0.5, '#2a1c10');
-    if (role === 'vagrant') { // bindle + patch
-      g.strokeStyle = '#6b4630'; g.lineWidth = 1.2;
-      g.beginPath(); g.moveTo(9, 22); g.lineTo(4, 10); g.stroke();
-      disc(g, 4, 9, 3, '#c4473a'); disc(g, 3.4, 8.4, 1, '#e8a090');
-      g.fillStyle = '#a89c86'; g.fillRect(15, 19, 3, 3);
-    } else if (role === 'builder') { // hammer
+    const walk = pose === 'walk0' || pose === 'walk1';
+    const step = pose === 'walk1' ? 2.4 : pose === 'walk0' ? -1.2 : 0;
+    const hunch = role === 'vagrant' ? 2 : pose === 'pickup' ? 3 : 0;
+    const work = pose === 'work0' || pose === 'work1' || pose === 'work2';
+    if (role !== 'vagrant' || pose !== 'pickup') folkLegs(g, walk ? step : 0);
+    if (role === 'vagrant') {
+      ell(g, 15 + hunch * 0.3, 20, 6.4, 6.2, '#8a7d6c');
+      ell(g, 17, 21.5, 3.2, 4.4, '#6a5e52');
+      g.fillStyle = '#a89884'; g.fillRect(12, 18, 3.2, 2.6);
+      disc(g, 14.5 + hunch, 12 + hunch * 0.4, 3.6, '#d7b090');
+      folkHood(g, 14.2 + hunch, 11.4 + hunch * 0.3, '#6e6256');
+      disc(g, 16 + hunch, 12.2, 0.55, '#2a1c10');
+      const bob = pose === 'walk1' ? -1.5 : pose === 'walk0' ? 1 : 0;
+      g.strokeStyle = '#5c4030'; g.lineWidth = 1.4;
+      g.beginPath(); g.moveTo(8, 18); g.lineTo(3, 8 + bob); g.stroke();
+      ell(g, 3.2, 7.2 + bob, 3.3, 2.8, '#c45a48');
+      ell(g, 2.4, 6.4 + bob, 1.2, 1, '#f0c2b4');
+    } else if (role === 'villager') {
+      const lean = pose === 'pickup' ? 2.2 : 0;
+      ell(g, 14 + lean, 19, 6.2, 6.6, '#ead7b0');
+      ell(g, 16.2 + lean, 20.4, 3, 4.6, '#c9ae82');
+      g.fillStyle = '#8d6a42'; g.fillRect(11, 20, 8, 1.5);
+      disc(g, 14 + lean * 0.4, 11, 3.6, '#e6b898');
+      folkHood(g, 14, 10.2, '#8d5a34');
+      disc(g, 15.4, 11.2, 0.55, '#2a1c10');
+      if (pose === 'pickup') {
+        g.strokeStyle = '#e6b898'; g.lineWidth = 2;
+        g.beginPath(); g.moveTo(12, 20); g.lineTo(8, 28); g.moveTo(18, 20); g.lineTo(16, 28); g.stroke();
+        ell(g, 12, 29, 3.2, 2, '#c9a874');
+      } else ell(g, 21, 21, 2.5, 2.8, '#c9a874');
+    } else if (role === 'builder') {
+      ell(g, 14, 19.5, 6.3, 6.5, '#e08a48');
+      ell(g, 16.4, 20.6, 3, 4.6, '#b45e2c');
+      g.fillStyle = '#6b4630'; g.fillRect(11, 21, 8, 1.6);
+      disc(g, 14, 11, 3.5, '#e6b898');
+      ell(g, 14, 8.6, 7.2, 1.7, '#e2c56a');
+      ell(g, 14, 6.8, 3.6, 2.4, '#f0d48a');
+      disc(g, 15.5, 11.2, 0.55, '#2a1c10');
+      const ang = pose === 'work0' ? -1.1 : pose === 'work1' ? -0.2 : pose === 'work2' ? 0.9 : -0.6;
+      const hx = 18 + Math.cos(ang) * 6, hy = 16 + Math.sin(ang) * 6;
+      g.strokeStyle = '#6b4630'; g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(18, 18); g.lineTo(hx, hy); g.stroke();
+      g.save(); g.translate(hx, hy); g.rotate(ang);
+      g.fillStyle = '#b7bec6'; g.fillRect(-3.2, -1.8, 7.2, 3.4);
+      g.fillStyle = '#e4e8ee'; g.fillRect(-3.2, -1.8, 7.2, 1.2);
+      g.restore();
+    } else {
+      ell(g, 14, 19.5, 6.2, 6.4, '#b7c45e');
+      ell(g, 16.3, 20.6, 3, 4.5, '#8a9440');
+      g.fillStyle = '#6b5430'; g.fillRect(11, 21, 8, 1.5);
+      disc(g, 14, 11.2, 3.5, '#e6b898');
+      ell(g, 14, 8.8, 8, 1.8, '#f0d48a');
+      ell(g, 14, 7, 3.4, 2.5, '#e2c56a');
+      disc(g, 15.6, 11.4, 0.55, '#2a1c10');
+      const sweep = pose === 'work0' ? -0.8 : pose === 'work1' ? 0.1 : pose === 'work2' ? 0.9 : -0.35;
+      g.save(); g.translate(20, 18); g.rotate(sweep);
       g.strokeStyle = '#6b4630'; g.lineWidth = 1.5;
-      g.beginPath(); g.moveTo(20, 22); g.lineTo(24, 13); g.stroke();
-      g.fillStyle = '#9aa0a8'; g.fillRect(21.2, 10.4, 6, 3.4);
-    } else if (role === 'farmer') { // scythe
-      g.strokeStyle = '#6b4630'; g.lineWidth = 1.3;
-      g.beginPath(); g.moveTo(21, 30); g.lineTo(23, 6); g.stroke();
-      g.strokeStyle = '#d5dde4'; g.lineWidth = 1.6;
-      g.beginPath(); g.moveTo(23, 6); g.quadraticCurveTo(17, 4, 13, 8); g.stroke();
-    } else { // villager: little sack
-      ell(g, 20, 22, 2.6, 3, '#c9a874');
+      g.beginPath(); g.moveTo(0, 8); g.lineTo(1, -10); g.stroke();
+      g.strokeStyle = '#e7eef2'; g.lineWidth = 1.8;
+      g.beginPath(); g.moveTo(1, -10); g.quadraticCurveTo(-6, -12, -8, -6); g.stroke();
+      g.restore();
     }
   });
   spr.gy = 33;
@@ -1299,101 +1339,201 @@ function paintFolk(role, frame) {
 function paintToolIcon(tool) {
   return bake(16, 18, g => {
     if (tool === 'bow') {
-      g.strokeStyle = '#8b5a32'; g.lineWidth = 1.8; g.beginPath(); g.arc(4, 9, 7, -1.2, 1.2); g.stroke();
-      g.strokeStyle = '#f4ead8'; g.lineWidth = 0.7; g.beginPath(); g.moveTo(6.5, 2.4); g.lineTo(6.5, 15.6); g.stroke();
+      g.strokeStyle = '#6b4630'; g.lineWidth = 2; g.beginPath(); g.arc(5, 9, 6.4, -1.15, 1.15); g.stroke();
+      g.strokeStyle = '#f6efe2'; g.lineWidth = 0.9; g.beginPath(); g.moveTo(7.2, 3.2); g.lineTo(7.2, 14.8); g.stroke();
+      g.fillStyle = '#c4473a'; g.beginPath(); g.moveTo(12, 8); g.lineTo(15.5, 9); g.lineTo(12, 10); g.fill();
     } else if (tool === 'hammer') {
-      g.strokeStyle = '#8b5a32'; g.lineWidth = 2; g.beginPath(); g.moveTo(8, 17); g.lineTo(8, 5); g.stroke();
-      g.fillStyle = '#9aa0a8'; g.fillRect(3, 2, 10, 4.4); g.fillStyle = '#c9ced4'; g.fillRect(3, 2, 10, 1.4);
+      g.strokeStyle = '#6b4630'; g.lineWidth = 2.2; g.beginPath(); g.moveTo(8, 16.5); g.lineTo(8, 6); g.stroke();
+      g.fillStyle = '#9aa3ad'; g.fillRect(2.4, 2.2, 11, 4.6);
+      g.fillStyle = '#e4e8ee'; g.fillRect(2.4, 2.2, 11, 1.5);
     } else {
-      g.strokeStyle = '#8b5a32'; g.lineWidth = 1.6; g.beginPath(); g.moveTo(10, 17); g.lineTo(11, 2); g.stroke();
-      g.strokeStyle = '#d5dde4'; g.lineWidth = 1.8; g.beginPath(); g.moveTo(11, 2.5); g.quadraticCurveTo(5, 1, 1.5, 6); g.stroke();
+      g.strokeStyle = '#6b4630'; g.lineWidth = 1.8; g.beginPath(); g.moveTo(11, 16.5); g.lineTo(12, 3); g.stroke();
+      g.strokeStyle = '#e7eef4'; g.lineWidth = 2; g.beginPath(); g.moveTo(12, 3.2); g.quadraticCurveTo(4, 1.2, 1.4, 7); g.stroke();
     }
   });
 }
-function paintStand() {
-  const spr = bake(40, 34, g => {
-    ell(g, 20, 30, 16, 3.4, '#a8885a');
-    g.fillStyle = '#6e4328'; g.fillRect(5, 8, 3, 23); g.fillRect(32, 8, 3, 23);
-    g.fillStyle = '#8b5a32'; g.fillRect(6, 8, 1.4, 23); g.fillRect(33, 8, 1.4, 23);
-    g.fillStyle = '#b07a45'; g.fillRect(3, 9, 34, 3.4); g.fillStyle = '#d2a56c'; g.fillRect(3, 9, 34, 1.2);
-    g.fillStyle = '#b07a45'; g.fillRect(5, 24, 30, 2.4);
-    poly(g, [[1, 9], [20, 1], [39, 9]], '#d06a45');
-    poly(g, [[20, 1], [39, 9], [30, 9]], '#a34c30');
+function paintSignTool(g, tool) {
+  g.fillStyle = '#f3e6c4'; g.fillRect(14, 2.2, 12, 8);
+  g.strokeStyle = '#6e4328'; g.lineWidth = 1; g.strokeRect(14, 2.2, 12, 8);
+  g.save(); g.translate(16.2, 3.2); g.scale(0.55, 0.42);
+  if (tool === 'bow') {
+    g.strokeStyle = '#6b4630'; g.lineWidth = 2.4; g.beginPath(); g.arc(6, 8, 6, -1.1, 1.1); g.stroke();
+  } else if (tool === 'hammer') {
+    g.fillStyle = '#8d96a0'; g.fillRect(2, 2, 10, 4); g.strokeStyle = '#6b4630'; g.lineWidth = 2; g.beginPath(); g.moveTo(7, 6); g.lineTo(7, 14); g.stroke();
+  } else {
+    g.strokeStyle = '#d5dde4'; g.lineWidth = 2.2; g.beginPath(); g.moveTo(12, 3); g.quadraticCurveTo(4, 2, 2, 8); g.stroke();
+    g.strokeStyle = '#6b4630'; g.beginPath(); g.moveTo(10, 4); g.lineTo(8, 14); g.stroke();
+  }
+  g.restore();
+}
+function paintStand(tool) {
+  const spr = bake(40, 36, g => {
+    ell(g, 20, 32, 16, 3.2, '#c4a574');
+    g.fillStyle = '#5c3a24'; g.fillRect(6, 12, 3.2, 20); g.fillRect(31, 12, 3.2, 20);
+    g.fillStyle = '#a56b3e'; g.fillRect(6.4, 12, 1.3, 20); g.fillRect(31.4, 12, 1.3, 20);
+    g.fillStyle = '#c4925a'; g.fillRect(4, 14, 32, 3.2);
+    g.fillStyle = '#e2c49a'; g.fillRect(4, 14, 32, 1.1);
+    g.fillStyle = '#b07a45'; g.fillRect(5, 26, 30, 2.6);
+    g.fillStyle = '#d2a56c'; g.fillRect(5, 26, 30, 0.9);
+    poly(g, [[2, 14], [20, 4], [38, 14]], '#d06a45');
+    poly(g, [[20, 4], [38, 14], [28, 14]], '#a34c30');
+    paintSignTool(g, tool);
   });
-  spr.gy = 31;
+  spr.gy = 33;
   return spr;
 }
-function paintHouse(pale) {
-  const wall = pale ? '#a3ac9e' : '#f3e6cc', wallD = pale ? '#7c8578' : '#d2bf9a';
-  const roof = pale ? '#6d776c' : '#d06a45', roofL = pale ? '#909a88' : '#f0a07a', roofD = pale ? '#465046' : '#a34c30';
-  const spr = bake(48, 50, g => {
-    poly(g, [[6, 26], [32, 26], [32, 46], [6, 46]], wall);
-    poly(g, [[32, 26], [42, 20], [42, 40], [32, 46]], wallD);
-    g.fillStyle = pale ? 'rgba(20,28,20,.35)' : 'rgba(110,70,40,.45)';
-    g.fillRect(6, 26, 26, 1.6); g.fillRect(6, 36, 26, 1.2); g.fillRect(18, 26, 1.4, 20);
-    g.fillStyle = pale ? '#1a1e1a' : '#6e4328'; g.fillRect(10, 34, 7, 12);
-    g.fillStyle = pale ? '#c6ff8a' : '#ffd27a'; g.fillRect(22, 31, 6, 5);
-    g.fillStyle = pale ? '#3c443c' : '#6e4328'; g.fillRect(24.6, 31, 0.9, 5); g.fillRect(22, 33.2, 6, 0.9);
-    poly(g, [[3, 28], [19, 8], [35, 28]], roof);
-    poly(g, [[19, 8], [44, 3 + 18], [35, 28]], roofD);
-    poly(g, [[3, 28], [19, 8], [13, 22]], roofL);
-    g.fillStyle = pale ? '#5e675e' : '#8f877c'; g.fillRect(34, 8, 4, 9);
-    if (pale) { disc(g, 19, 20, 2.6, '#e7ecdf'); disc(g, 18.2, 19.6, 0.55, '#1c2418'); disc(g, 19.8, 19.6, 0.55, '#1c2418'); }
+function paintHouse(kind) {
+  const pale = kind === 'pale', dmg = kind === 'dmg';
+  const wall = pale ? '#9aa394' : dmg ? '#e4d3b4' : '#f6ead4';
+  const wallD = pale ? '#6d756c' : dmg ? '#b7a484' : '#d9c4a2';
+  const roof = pale ? '#6a7368' : '#d06a45', roofL = pale ? '#8d9788' : '#f2a27c', roofD = pale ? '#455046' : '#a34c30';
+  const spr = bake(48, 52, g => {
+    poly(g, [[8, 28], [34, 28], [34, 48], [8, 48]], wall);
+    poly(g, [[34, 28], [43, 22], [43, 42], [34, 48]], wallD);
+    g.strokeStyle = pale ? 'rgba(30,36,30,.35)' : 'rgba(120,80,40,.28)';
+    g.lineWidth = 1;
+    g.beginPath(); g.moveTo(8, 34); g.lineTo(34, 34); g.moveTo(8, 41); g.lineTo(34, 41); g.stroke();
+    g.fillStyle = pale ? '#2a3028' : '#6e4328';
+    g.fillRect(12, 36, 7, 12);
+    g.fillStyle = pale ? '#9dff7a' : dmg ? '#3a3028' : '#ffd27a';
+    g.fillRect(24, 32, 6.5, 5.5);
+    if (!dmg) {
+      g.strokeStyle = pale ? '#1c2418' : '#6e4328'; g.lineWidth = 0.8;
+      g.beginPath(); g.moveTo(27.2, 32); g.lineTo(27.2, 37.5); g.moveTo(24, 34.6); g.lineTo(30.5, 34.6); g.stroke();
+    }
+    poly(g, [[4, 30], [20, 10], [36, 30]], roof);
+    poly(g, [[20, 10], [44, 26], [36, 30]], roofD);
+    poly(g, [[4, 30], [20, 10], [14, 22]], roofL);
+    if (dmg) {
+      g.fillStyle = '#8d8478'; g.beginPath(); g.moveTo(30, 18); g.lineTo(38, 24); g.lineTo(32, 26); g.fill();
+      g.strokeStyle = '#5c4030'; g.lineWidth = 1.1;
+      g.beginPath(); g.moveTo(14, 32); g.lineTo(18, 40); g.lineTo(16, 46); g.stroke();
+    }
+    g.fillStyle = pale ? '#5c645c' : '#8d8478';
+    g.fillRect(36, 12, 4.2, 10);
+    g.fillStyle = pale ? '#3e463e' : '#6e4328';
+    g.fillRect(37.2, 10, 2, 3);
+    if (pale) {
+      disc(g, 15.5, 40, 2.4, '#e7ecdf');
+      disc(g, 14.7, 39.6, 0.5, '#1c2418');
+      disc(g, 16.3, 39.6, 0.5, '#1c2418');
+    }
   });
-  spr.gy = 46;
-  spr.smoke = { dx: 12, dy: -42 };
+  spr.gy = 48;
+  if (!pale && !dmg) spr.smoke = { dx: 14, dy: -40 };
   return spr;
 }
-function paintFarm(pale) {
+function paintFarm(kind) {
+  const pale = kind === 'pale', ripe = kind === 'ripe', grow = kind === 'growing' || ripe;
   const spr = bake(64, 40, g => {
-    poly(g, [[4, 18], [50, 12], [60, 26], [12, 34]], pale ? '#7c8270' : '#a8784a');
-    for (let i = 0; i < 5; i++) {
-      const t = i / 4;
-      g.strokeStyle = pale ? '#5e6454' : '#7e5430'; g.lineWidth = 1.6;
-      g.beginPath(); g.moveTo(6 + t * 6, 19 + t * 14); g.lineTo(52 + t * 7, 13 + t * 12); g.stroke();
-      for (let k = 0; k < 6; k++) {
-        const x = 10 + t * 6 + k * 7.6, y = 18 + t * 13.5 - k * 0.95;
-        if (pale) { g.strokeStyle = '#8b9278'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 1, y - 3); g.stroke(); }
-        else { ell(g, x, y - 1.5, 2.4, 2, '#7eac52'); ell(g, x - 0.5, y - 2.4, 1.3, 1.1, '#a8d070'); }
+    poly(g, [[6, 16], [52, 10], [60, 26], [14, 34]], pale ? '#7c8270' : '#b88858');
+    poly(g, [[10, 18], [48, 13], [54, 24], [16, 30]], pale ? '#6a705f' : '#a87448');
+    g.strokeStyle = pale ? '#5a6050' : '#7a5430'; g.lineWidth = 1.3;
+    for (let i = 0; i < 4; i++) {
+      g.beginPath(); g.moveTo(12 + i * 2, 18 + i * 3.2); g.lineTo(46 + i, 14 + i * 2.6); g.stroke();
+    }
+    if (grow) {
+      for (let i = 0; i < 16; i++) {
+        const x = 14 + (i % 8) * 4.6, y = 18 + (i % 8) * 0.35 + ((i / 8) | 0) * 6;
+        if (pale) {
+          g.strokeStyle = '#8a8470'; g.lineWidth = 1;
+          g.beginPath(); g.moveTo(x, y + 2); g.lineTo(x + 1, y - 2); g.stroke();
+        } else if (ripe) {
+          ell(g, x, y, 1.5, 3.2, '#e2b14a');
+          ell(g, x, y + 2.2, 1.1, 1.6, '#c4922a');
+        } else {
+          ell(g, x, y, 1.6, 2.4, '#7eac52');
+          ell(g, x, y - 1.2, 1, 1.2, '#b6d46e');
+        }
       }
     }
-    g.fillStyle = pale ? '#4e5448' : '#6e4328';
-    for (const [x, y] of [[4, 18], [50, 12], [60, 26], [12, 34]]) g.fillRect(x - 1, y - 6, 2.2, 7);
-    g.strokeStyle = pale ? '#6a7064' : '#b07a45'; g.lineWidth = 1;
-    g.beginPath(); g.moveTo(4, 15); g.lineTo(50, 9); g.lineTo(60, 23); g.stroke();
+    g.fillStyle = pale ? '#4a5048' : '#5c3a24';
+    for (const [x, y] of [[6, 16], [52, 10], [60, 26], [14, 34]]) g.fillRect(x - 1.1, y - 7, 2.4, 8);
+    g.strokeStyle = pale ? '#6a7062' : '#c4925a'; g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(6, 12); g.lineTo(52, 6); g.lineTo(60, 22); g.lineTo(14, 30); g.stroke();
+    if (pale) {
+      disc(g, 20, 18, 2.3, '#e7ecdf');
+      disc(g, 19.3, 17.6, 0.45, '#1c2418'); disc(g, 20.7, 17.6, 0.45, '#1c2418');
+    }
   });
-  spr.gy = 30;
+  spr.gy = 32;
   return spr;
 }
-function paintScaffold() {
-  const spr = bake(44, 48, g => {
-    ell(g, 22, 44, 18, 4, 'rgba(120,90,50,.35)');
-    g.strokeStyle = '#8b5a32'; g.lineWidth = 2.2;
+function paintScaffold(stage) {
+  const spr = bake(46, 50, g => {
+    ell(g, 23, 46, 16, 3.4, 'rgba(90,60,30,.28)');
+    const posts = stage === 0 ? [8, 36] : [7, 22, 37];
+    g.strokeStyle = '#7a4e2e'; g.lineWidth = 2.4;
     g.beginPath();
-    g.moveTo(6, 45); g.lineTo(6, 8); g.moveTo(38, 45); g.lineTo(38, 8); g.moveTo(22, 45); g.lineTo(22, 4);
-    g.moveTo(4, 30); g.lineTo(40, 30); g.moveTo(4, 16); g.lineTo(40, 16);
+    for (const x of posts) { g.moveTo(x, 46); g.lineTo(x, stage === 0 ? 22 : stage === 1 ? 14 : 8); }
     g.stroke();
-    g.strokeStyle = '#c4925a'; g.lineWidth = 1.3;
-    g.beginPath(); g.moveTo(6, 45); g.lineTo(22, 30); g.moveTo(22, 30); g.lineTo(38, 16); g.moveTo(38, 45); g.lineTo(22, 30); g.stroke();
-    g.fillStyle = '#d2a56c'; g.fillRect(3, 28.5, 38, 3); g.fillRect(3, 14.5, 38, 3);
-    ell(g, 31, 43, 6, 2.4, '#b9b0a2'); ell(g, 30, 41.6, 4, 1.6, '#d9d0c2');
+    g.fillStyle = '#d2a56c';
+    if (stage >= 0) g.fillRect(6, 30, stage === 0 ? 32 : 34, 3);
+    if (stage >= 1) g.fillRect(6, 18, 34, 3);
+    if (stage >= 2) {
+      g.fillRect(6, 8, 34, 3);
+      g.strokeStyle = '#c4925a'; g.lineWidth = 1.3;
+      g.beginPath(); g.moveTo(7, 46); g.lineTo(22, 30); g.moveTo(37, 46); g.lineTo(22, 18); g.stroke();
+    }
+    ell(g, 30, 45, 5, 2, '#cfc6b6');
   });
-  spr.gy = 45;
+  spr.gy = 47;
+  return spr;
+}
+function paintOrderMark() {
+  const spr = bake(18, 28, g => {
+    g.fillStyle = '#6e4328'; g.fillRect(8, 8, 2.2, 18);
+    g.fillStyle = '#3e74c8';
+    g.beginPath(); g.moveTo(10, 6); g.lineTo(17, 9); g.lineTo(10, 12); g.fill();
+    g.fillStyle = '#f0c14a'; g.beginPath(); g.arc(10, 6, 1.4, 0, 6.3); g.fill();
+    ell(g, 9, 26, 5, 2, 'rgba(90,60,30,.35)');
+  });
+  spr.gy = 27;
   return spr;
 }
 function paintCamp() {
-  const spr = bake(70, 44, g => {
-    poly(g, [[4, 38], [22, 8], [40, 38]], '#9a8a6e');
-    poly(g, [[22, 8], [40, 38], [30, 38]], '#776a52');
-    poly(g, [[17, 38], [22, 24], [27, 38]], '#3e3428');
-    g.strokeStyle = '#6b4630'; g.lineWidth = 1.4; g.beginPath(); g.moveTo(22, 8); g.lineTo(22, 3); g.stroke();
-    ell(g, 54, 37, 9, 3.4, '#8e8578');
-    g.strokeStyle = '#5c4030'; g.lineWidth = 2;
-    g.beginPath(); g.moveTo(47, 37); g.lineTo(60, 33); g.moveTo(48, 33); g.lineTo(61, 37); g.stroke();
+  const spr = bake(70, 46, g => {
+    ell(g, 28, 40, 22, 5, 'rgba(90,70,40,.25)');
+    g.strokeStyle = '#6b4630'; g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(8, 40); g.lineTo(24, 14); g.moveTo(46, 40); g.lineTo(24, 14); g.stroke();
+    poly(g, [[8, 40], [24, 12], [46, 40]], '#c2ae8c');
+    poly(g, [[24, 12], [46, 40], [34, 40]], '#8f7d62');
+    g.fillStyle = '#6a5340'; g.beginPath(); g.moveTo(18, 40); g.lineTo(24, 26); g.lineTo(30, 40); g.fill();
+    g.fillStyle = '#a33b32'; g.fillRect(20, 22, 4, 3);
+    g.fillStyle = '#d7c4a4'; g.beginPath(); g.moveTo(36, 28); g.lineTo(44, 24); g.lineTo(42, 32); g.fill();
+    ell(g, 14, 41, 6, 2.2, '#6e5438');
+    ell(g, 56, 40, 10, 3.6, '#8d8478');
+    g.fillStyle = '#6e6560';
+    g.beginPath(); g.ellipse(56, 39, 7, 2.4, 0, 0, 6.3); g.fill();
+    g.strokeStyle = '#5c4030'; g.lineWidth = 1.8;
+    g.beginPath(); g.moveTo(50, 39); g.lineTo(62, 36); g.moveTo(50, 36); g.lineTo(62, 39); g.stroke();
   });
-  spr.gy = 39;
-  spr.fire = { dx: 54 - 35, dy: -6 };
+  spr.gy = 42;
+  spr.fire = { dx: 56 - 35, dy: -8 };
   return spr;
+}
+function paintCoinFrame(i) {
+  const squeeze = [1, 0.72, 0.32, 0.1, 0.32, 0.72][i];
+  return bake(16, 16, g => {
+    const rx = Math.max(0.7, 5.6 * squeeze);
+    ell(g, 8, 8.6, rx + 0.6, 5.6, '#a56b12');
+    ell(g, 8, 7.8, rx, 4.8, '#f0c14a');
+    if (squeeze > 0.45) {
+      ell(g, 8 - rx * 0.28, 6.4, rx * 0.35, 1.5, 'rgba(255,248,220,.75)');
+      g.strokeStyle = '#8a5a14'; g.lineWidth = 1.1;
+      g.beginPath(); g.moveTo(8, 5.4); g.lineTo(8, 10.4); g.stroke();
+    } else {
+      g.fillStyle = '#ffe9a8'; g.fillRect(7.3, 3.4, 1.4, 8.4);
+    }
+  });
+}
+function paintShimmer() {
+  return bake(14, 14, g => {
+    g.fillStyle = 'rgba(255,236,170,.9)';
+    g.beginPath();
+    g.moveTo(7, 1); g.lineTo(8.2, 5.6); g.lineTo(13, 7); g.lineTo(8.2, 8.4); g.lineTo(7, 13); g.lineTo(5.8, 8.4); g.lineTo(1, 7); g.lineTo(5.8, 5.6); g.closePath();
+    g.fill();
+  });
 }
 function buildArt() {
   Art.shadow = paintShadow();
@@ -1410,20 +1550,29 @@ function buildArt() {
   Art.fort = paintFort(false);
   Art.fortP = paintFort(true);
   Art.monarch = [0, 1].map(paintMonarch);
-  Art.archer = [0, 1].map(paintArcher);
+  Art.archer = [0, 1, 2].map(f => paintArcher(f, false));
+  Art.archerRally = [0, 1, 2].map(f => paintArcher(f, true));
   Art.guardian = [0, 1].map(paintGuardian);
   Art.warden = [0, 1].map(paintWarden);
   Art.shambler = [0, 1].map(paintShambler);
   Art.skeleton = [0, 1].map(paintSkeleton);
   Art.necro = [0, 1].map(paintNecro);
-  Art.folk = {};
-  for (const r of Object.keys(FOLK_STYLE)) Art.folk[r] = [0, 1].map(f => paintFolk(r, f));
+  Art.folk = {
+    vagrant: ['idle', 'walk0', 'walk1'].map(p => paintFolk('vagrant', p)),
+    villager: ['idle', 'walk0', 'walk1', 'pickup'].map(p => paintFolk('villager', p)),
+    builder: ['idle', 'walk0', 'walk1', 'work0', 'work1', 'work2'].map(p => paintFolk('builder', p)),
+    farmer: ['idle', 'walk0', 'walk1', 'work0', 'work1', 'work2'].map(p => paintFolk('farmer', p)),
+  };
   Art.tool = { bow: paintToolIcon('bow'), hammer: paintToolIcon('hammer'), scythe: paintToolIcon('scythe') };
-  Art.stand = paintStand();
-  Art.house = paintHouse(false); Art.houseP = paintHouse(true);
-  Art.farm = paintFarm(false); Art.farmP = paintFarm(true);
-  Art.scaffold = paintScaffold();
+  Art.stand = { bow: paintStand('bow'), hammer: paintStand('hammer'), scythe: paintStand('scythe') };
+  Art.house = paintHouse('live'); Art.houseDmg = paintHouse('dmg'); Art.houseP = paintHouse('pale');
+  Art.farm = { tilled: paintFarm('tilled'), growing: paintFarm('growing'), ripe: paintFarm('ripe'), pale: paintFarm('pale') };
+  Art.scaffold = [0, 1, 2].map(paintScaffold);
+  Art.orderMark = paintOrderMark();
   Art.camp = paintCamp();
+  Art.coinFrames = [0, 1, 2, 3, 4, 5].map(paintCoinFrame);
+  Art.coin = Art.coinFrames[0];
+  Art.shimmer = paintShimmer();
   Art.flame = paintRadial(18, 22, [[0, 'rgba(255,250,220,.95)'], [0.35, 'rgba(255,170,60,.9)'], [1, 'rgba(255,120,40,0)']]);
   Art.flameG = paintRadial(18, 22, [[0, 'rgba(236,255,220,.95)'], [0.35, 'rgba(150,230,90,.9)'], [1, 'rgba(80,160,50,0)']]);
   Art.orb = paintRadial(24, 24, [[0, 'rgba(230,255,210,1)'], [0.35, 'rgba(140,255,90,.85)'], [1, 'rgba(80,180,40,0)']]);
@@ -1764,20 +1913,22 @@ function buildingSpr(b) {
     return pale ? (wood ? Art.wallWP : Art.wallSP) : (wood ? Art.wallW : Art.wallS);
   }
   if (b.type === 'fort') return pale ? Art.fortP : Art.fort;
-  if (b.type === 'house') return pale ? Art.houseP : Art.house;
+  if (b.type === 'house') return pale ? Art.houseP : (b.hp < b.max ? Art.houseDmg : Art.house);
   if (b.type === 'farm') return pale ? Art.farmP : Art.farm;
   return pale ? Art.towerP : Art.tower;
 }
 function drawScaffold(b) {
   const spr = buildingSpr(b);
-  ctx.globalAlpha = 0.18 + 0.5 * b.built;
+  ctx.globalAlpha = 0.16 + 0.45 * b.built;
   blit(spr, b.x, b.y, { sc: b.type === 'wall' ? 1.18 : 1 });
   ctx.globalAlpha = 1;
-  const sc = b.type === 'farm' ? 0.75 : b.type === 'wall' ? 0.8 : 1;
+  const sc = b.type === 'farm' ? 0.72 : b.type === 'wall' ? 0.78 : b.type === 'house' ? 0.92 : 1;
+  const stage = b.built < 0.33 ? 0 : b.built < 0.66 ? 1 : 2;
   shadow(b.x, b.y + 2, 16 * sc, 5);
-  blit(Art.scaffold, b.x, b.y + 2, { sc });
-  bar(b.x, b.y + 10, 40, b.built, '#8fd06a');
+  blit(Art.scaffold[stage], b.x, b.y + 2, { sc });
   const busy = S.folk.some(f => f.role === 'builder' && f.job === b && f.working);
+  if (!busy) blit(Art.orderMark, b.x - 14 * sc, b.y + 2, { sc: 0.9 });
+  bar(b.x, b.y + 10, 40, b.built, '#8fd06a');
   if (!S.folk.some(f => f.role === 'builder')) placeTag('Needs a Builder', b.x, b.y + 26, 11, '#ffe6b0', '#e6c27a');
   else if (!busy) placeTag(NICE[b.type] + ' · waiting', b.x, b.y + 26, 11, '#fff6e4', null);
 }
@@ -1785,7 +1936,10 @@ function drawBuilding(b) {
   if (b.built < 1) return drawScaffold(b);
   if (b.type === 'farm') {
     const pale = b.owner === 'pale';
-    blit(pale ? Art.farmP : Art.farm, b.x, b.y + 6);
+    const worked = b.farmer && S.folk.includes(b.farmer);
+    const prog = b.prog || 0;
+    const spr = pale ? Art.farm.pale : (worked && prog > TUNE.farmEvery * 0.55) ? Art.farm.ripe : (worked || prog > 0.8) ? Art.farm.growing : Art.farm.tilled;
+    blit(spr, b.x, b.y + 6);
     if (b.hp < b.max) bar(b.x, b.y + 12, 36, b.hp / b.max, pale ? '#7dce6a' : '#e2a23a');
     if (!pale && !(b.farmer && S.folk.includes(b.farmer))) placeTag('Needs a Farmer', b.x, b.y + 22, 11, '#ffe6b0', '#e6c27a');
     return;
@@ -1892,23 +2046,28 @@ function drawMonarch() {
 }
 function drawArcher(a) {
   const mot = actorMotion(a);
+  const set = a.follow ? Art.archerRally : Art.archer;
+  const fr = mot.walking ? 1 + (mot.fr & 1) : 0;
   shadow(a.x, a.y + 3, 8, 3.4);
-  blit(Art.archer[mot.fr], a.x, a.y + 4, mot);
+  blit(set[fr], a.x, a.y + 4, { flip: mot.flip, bob: mot.bob });
   flashAt(a.x, a.y - 8, 8, 10, a.flash);
 }
 function drawFolk(f) {
   const mot = actorMotion(f);
-  shadow(f.x, f.y + 3, 8, 3.4);
   const set = Art.folk[f.role] || Art.folk.villager;
+  let idx = mot.walking ? 1 + (mot.fr & 1) : 0;
+  if (f.working && (f.role === 'builder' || f.role === 'farmer')) idx = 3 + ((S.t * (f.role === 'builder' ? 8 : 6)) | 0) % 3;
+  else if (f.role === 'villager' && f.stand && Math.hypot(f.x - f.stand.x, f.y - f.stand.y) < 24) idx = 3;
   let bob = mot.bob;
-  if (f.working && f.role === 'builder') bob += Math.abs(Math.sin(S.t * 9)) * -2;
-  blit(set[mot.fr], f.x, f.y + 4, { flip: mot.flip, bob });
+  if (f.working && f.role === 'builder') bob += Math.abs(Math.sin(S.t * 9)) * -1.2;
+  shadow(f.x, f.y + 3, 8, 3.4);
+  blit(set[idx] || set[0], f.x, f.y + 4, { flip: mot.flip, bob });
   if (f.working && f.role === 'builder' && ((S.t * 3) | 0) % 2 === 0 && Math.sin(S.t * 9) > 0.9) S.fx.push({ k: 'hit', x: f.x + (mot.flip ? -12 : 12), y: f.y - 6, t: 0.15, t0: 0.15 });
   flashAt(f.x, f.y - 8, 8, 10, f.flash);
 }
 function drawStand(st) {
   shadow(st.x, st.y + 2, 18, 5);
-  blit(Art.stand, st.x, st.y);
+  blit(Art.stand[st.tool] || Art.stand.bow, st.x, st.y);
   const ic = Art.tool[st.tool];
   for (let i = 0; i < st.tools; i++) ctx.drawImage(ic.c, st.x - 15 + i * 10, st.y - 22, 12, 13.5);
   const c = TOOL[st.tool].cost;
@@ -1922,9 +2081,16 @@ function drawStand(st) {
 function drawDrop(d) {
   const s = 1 - Math.min(0.5, d.z / 80);
   shadow(d.x, d.y + 1, 5 * s, 2.2 * s);
-  const spin = d.landed ? 1 : Math.abs(Math.cos(d.age * 18));
-  ctx.drawImage(Art.coin.c, d.x - 6 * spin, d.y - 12 - d.z, 12 * spin, 12);
-  if (d.landed && ((S.t * 2 + d.x) % 2) < 0.25) { ctx.fillStyle = 'rgba(255,250,220,.9)'; ctx.fillRect(d.x - 3, d.y - 9, 2, 2); }
+  const frames = Art.coinFrames || [Art.coin];
+  const fi = d.landed ? 0 : ((d.age * 12) | 0) % frames.length;
+  const spr = frames[fi];
+  ctx.drawImage(spr.c, d.x - 6, d.y - 12 - d.z, 12, 12);
+  if (d.landed) {
+    const pulse = 0.35 + Math.sin(S.t * 5 + d.x) * 0.25;
+    ctx.globalAlpha = pulse;
+    ctx.drawImage(Art.shimmer.c, d.x - 5, d.y - 16, 10, 10);
+    ctx.globalAlpha = 1;
+  }
 }
 function drawCamp(c) {
   shadow(c.x, c.y + 2, 26, 7);
