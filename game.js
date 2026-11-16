@@ -35,7 +35,9 @@ const TUNE = {
   clearMarkRange: 170, // monarch must be this close to mark a tree or rock
   demoTime: 4, // seconds for a Builder to tear down a marked building
   demoMarkRange: 170, // monarch must be this close to mark a building for demolish
+  sendTimeout: 6, // seconds a hired-worker selection lasts with no send / re-tap
 };
+
 const DEBUG = new URLSearchParams(location.search).get('debug') === '1';
 const NAMES = ['Crownhold', 'Ashford', 'Briarmoor', 'Coldwater', 'Duskfen', 'Elmreach', 'Frostgate', 'Gloamwood'];
 const UNDEAD = {
@@ -139,7 +141,7 @@ function newGame() {
   bakeGround();
   $('over').hidden = true;
   $('bar').hidden = false;
-  setBuild(null); showMenu(false);
+  setBuild(null); showMenu(false); clearSel();
   $('btnRally').classList.remove('sel');
   zoom = TUNE.zoomStart; applyScale();
   lookX = S.monarch.x; lookY = S.monarch.y; lookFree = false;
@@ -329,7 +331,7 @@ const endPtr = e => {
 cv.addEventListener('pointerup', endPtr); cv.addEventListener('pointercancel', endPtr);
 addEventListener('keydown', e => {
   keys[e.key.toLowerCase()] = true;
-  if (e.key === 'Escape' && S && S.build) { e.preventDefault(); setBuild(null); }
+  if (e.key === 'Escape' && S) { if (S.sel) { e.preventDefault(); clearSel(); } else if (S.build) { e.preventDefault(); setBuild(null); } }
   if (e.key === 'n' && DEBUG) skipPhase();
   if (e.key === ' ' && !e.repeat) dropCoin();
 });
@@ -342,7 +344,7 @@ document.addEventListener('contextmenu', e => e.preventDefault());
 $('bar').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || !S || S.over) return;
   const a = b.dataset.act;
-  if (a === 'build') { if (S.build) setBuild(null); else showMenu($('buildMenu').hidden); return; }
+  if (a === 'build') { if (S.sel) { clearSel(); return; } if (S.build) setBuild(null); else showMenu($('buildMenu').hidden); return; }
   if (a === 'rally') { showMenu(false); toggleRally(); }
 });
 $('buildMenu').addEventListener('click', e => {
@@ -366,6 +368,7 @@ $('btnRestart').addEventListener('click', () => newGame());
 
 function setBuild(t) {
   if (!S) return;
+  if (S.sel) S.sel = null;
   if (S.build === 'demolish' && t !== 'demolish') unmarkAllDemo();
   wallDrag = null;
   S.build = t; S.mapDirty = true;
@@ -392,8 +395,8 @@ function setZoomAt(z, sx, sy) {
 function followCam(dt) {
   if (!S || pinch) return;
   if (ptr && ptr.pan) return;
-  // In build mode, a pan or two-finger look stays put so you can place off-screen. Leaving build follows the monarch again.
-  if (lookFree && S.build) return;
+  // In build mode, or while a worker is selected to send, a pan / scripted look stays put so you can tap off-screen land.
+  if (lookFree && (S.build || (S && S.sel))) return;
   lookFree = false;
   const m = S.monarch;
   if (lookX == null) { lookX = m.x; lookY = m.y; return; }
@@ -424,12 +427,99 @@ function camera() {
 function s2w(sx, sy) { const c = camera(); return { x: c.x + (sx - vw / 2) / scale, y: c.y + (sy - vh / 2) / scale }; }
 function w2s(wx, wy) { const c = camera(); return { x: (wx - c.x) * scale + vw / 2, y: (wy - c.y) * scale + vh / 2 }; }
 
+function hiredWorkers() {
+  const list = [];
+  if (!S) return list;
+  for (const f of S.folk) if (f.role !== 'vagrant') list.push(f);
+  for (const a of S.archers) list.push(a);
+  return list;
+}
+function workerAt(x, y) {
+  let best = null, bd = Math.max(24, 42 / scale);
+  const pt = { x, y };
+  for (const u of hiredWorkers()) {
+    const d = dist(u, pt) - (u.r || 9);
+    if (d < bd) { bd = d; best = u; }
+  }
+  return best;
+}
+function isOwnedLand(x, y) {
+  const r = S.regions[regionIdAt(x, y)];
+  return !!(r && r.owner === 'player');
+}
+function clearSel() {
+  if (!S) return;
+  S.sel = null;
+  if (S.build) return;
+  const bb = $('btnBuild');
+  if (bb) {
+    bb.classList.remove('sel');
+    const b = bb.querySelector('b'), i = bb.querySelector('i');
+    if (b) b.textContent = 'Build';
+    if (i) i.textContent = 'menu';
+  }
+  const h = $('hint'); if (h) h.textContent = '';
+}
+function setSel(u) {
+  if (!S || !u) return;
+  S.sel = { u, t0: performance.now() };
+  const bb = $('btnBuild');
+  if (bb) {
+    bb.classList.add('sel');
+    const b = bb.querySelector('b'), i = bb.querySelector('i');
+    if (b) b.textContent = 'Cancel';
+    if (i) i.textContent = '';
+  }
+  const h = $('hint'); if (h) h.textContent = 'Tap where to send';
+}
+function sendWorker(u, x, y) {
+  if (!u) return false;
+  if (!isOwnedLand(x, y)) {
+    toast('You can only send workers on land you own', 'bad');
+    if (S.sel) S.sel.t0 = performance.now();
+    return false;
+  }
+  if (u.type === 'archer') {
+    u.follow = false;
+    u.sendPost = true;
+    u.post = { x, y, r: 16, sent: 1 };
+    u.tx = x; u.ty = y;
+    u.send = { x, y };
+  } else {
+    u.send = { x, y };
+    u.tx = x; u.ty = y;
+  }
+  clearSel();
+  return true;
+}
+function tickSel() {
+  if (!S || !S.sel) return;
+  const u = S.sel.u;
+  const gone = !u || u.hp <= 0 || u.role === 'vagrant'
+    || (u.type === 'archer' ? !S.archers.includes(u) : !S.folk.includes(u));
+  if (gone || performance.now() - (S.sel.t0 || 0) > (TUNE.sendTimeout || 6) * 1000) clearSel();
+}
+
 function onTap(sx, sy) {
   if (S.over) return;
   const w = s2w(sx, sy);
   if (S.build === 'clear') return tryMarkDecor(w.x, w.y, true);
   if (S.build === 'demolish') return tryMarkDemo(w.x, w.y, true);
   if (S.build) return tryPlace(S.build, w.x, w.y);
+  const hit = workerAt(w.x, w.y);
+  // Prefer a tree/rock under the finger unless a worker is already selected (then a worker tap switches/deselects).
+  const decor = decorAt(w.x, w.y, Math.max(28, 48 / scale));
+  if (hit) {
+    const hitD = dist(hit, w) - (hit.r || 9);
+    const decD = decor ? dist(decor, w) - (decor.r || 16) : 1e9;
+    const preferDecor = decor && !S.sel && decD <= hitD + 8;
+    if (!preferDecor) {
+      if (S.sel && S.sel.u === hit) clearSel();
+      else setSel(hit);
+      return;
+    }
+  }
+  if (S.sel) { sendWorker(S.sel.u, w.x, w.y); return; }
   if (tryMarkDecor(w.x, w.y, false)) return;
   // tap an enemy to focus it
   let best = null, bd = 45 / scale;
@@ -916,6 +1006,11 @@ function updateFolk(dt) {
   for (const f of S.folk) {
     f.working = false;
     if (f.role === 'vagrant') { if (S.camp) wanderAround(f, S.camp.x, S.camp.y + 10, 60, dt, sp); continue; }
+    if (f.send) {
+      const d = dist(f, f.send);
+      if (d <= 12) f.send = null;
+      else { moveTo(f, f.send.x, f.send.y, sp, dt); continue; }
+    }
     if (!hc) continue;
     const ix = hc.x, iy = hc.y + 58;
     if (f.role === 'villager') {
@@ -1015,6 +1110,7 @@ function assignPosts() {
   for (const r of owned()) if (r.core) cores.push(r.core);
   const posts = towers.concat(cores, walls);
   S.archers.forEach((a, i) => {
+    if (a.sendPost) return;
     const want = posts.length ? posts[i % posts.length] : null;
     if (a.post !== want) { a.post = want; a.tx = null; a.slotA = i * 2.399; }
   });
@@ -1300,7 +1396,10 @@ function update(dt) {
   const followers = S.archers.filter(a => a.follow);
   S.archers.forEach((a) => {
     let tx = a.x, ty = a.y, spd = 150;
-    if (a.follow) {
+    if (a.send) {
+      tx = a.send.x; ty = a.send.y; spd = 150;
+      if (Math.hypot(a.x - tx, a.y - ty) <= 12) a.send = null;
+    } else if (a.follow) {
       const k = followers.indexOf(a);
       const ang = (k / Math.max(1, followers.length)) * Math.PI * 2 + S.t * 0.2;
       tx = m.x + Math.cos(ang) * 55; ty = m.y + Math.sin(ang) * 55; spd = 210;
@@ -3579,6 +3678,34 @@ function render() {
   if (S.camp && vis(S.camp.x, S.camp.y)) placeTagClamped('Vagrant camp', S.camp.x, S.camp.y + 18, 12, '#fff6e4', '#c9b488');
   drawWallGhosts();
   for (const a of S.archers) if (a.follow && vis(a.x, a.y)) { ctx.strokeStyle = 'rgba(240,193,74,.85)'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.ellipse(a.x, a.y + 3, 11, 4.5, 0, 0, Math.PI * 2); ctx.stroke(); }
+  if (S.sel && S.sel.u) {
+    const u = S.sel.u;
+    if (vis(u.x, u.y)) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(240,193,74,.95)';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath(); ctx.ellipse(u.x, u.y + 4, 16, 6.5, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,248,220,.7)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.ellipse(u.x, u.y + 4, 19, 8, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+  }
+  for (const u of hiredWorkers()) {
+    if (!u.send || !vis(u.send.x, u.send.y)) continue;
+    const x = u.send.x, y = u.send.y;
+    ctx.save();
+    ctx.fillStyle = 'rgba(28,20,14,.55)';
+    ctx.beginPath(); ctx.ellipse(x, y + 2, 7, 3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#2a1c10'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(x, y + 2); ctx.lineTo(x, y - 22); ctx.stroke();
+    ctx.strokeStyle = '#f0c14a'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(x, y + 1); ctx.lineTo(x, y - 21); ctx.stroke();
+    ctx.fillStyle = '#f0c14a';
+    ctx.beginPath(); ctx.moveTo(x, y - 22); ctx.lineTo(x + 12, y - 16); ctx.lineTo(x, y - 10); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#2a1c10'; ctx.lineWidth = 1.1; ctx.stroke();
+    ctx.restore();
+  }
 
   const m = S.monarch;
   if (m.target && m.target.hp > 0) {
@@ -3704,6 +3831,7 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   fps = fps * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
   const steps = Math.max(1, Math.min(40, (window.__bc && window.__bc.timeScale) | 0));
+  tickSel();
   for (let i = 0; i < steps && !S.over; i++) update(dt);
   render(); drawHud();
   requestAnimationFrame(frame);
@@ -3724,6 +3852,7 @@ window.__bc = {
   clearWallDrag() { wallDrag = null; },
   findCampSpot, nearestCampSpot, refreshCamps, settleVagrants,
   stockBadge: false, rackedToolCount,
+  get sel() { return S && S.sel; }, setSel, clearSel, sendWorker, workerAt, hiredWorkers,
   teleport(x, y) { S.monarch.x = x; S.monarch.y = y; lookX = x; lookY = y; },
   coins(n) { S.coins += n; }, heal() { S.monarch.hp = S.monarch.max; },
   forceLose(id) { const r = S.regions[id]; if (r && r.core) damage(r.core, r.core.hp + 1); },
