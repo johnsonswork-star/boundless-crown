@@ -16,11 +16,11 @@ const TUNE = {
   startCoins: 12, keepSlots: 1, houseSlots: 2, startHouses: 1, startBuilders: 1,
   trickleEvery: 10,              // +1 coin per owned region every N s by day (small passive)
   dropRange: 64, pickupGrace: 0.6, standMax: 3,
-  standCost: { bow: 5, hammer: 3, scythe: 5 }, // Build-menu price; Hammer is cheap so you can get going
+  // Per-tool stock prices live on TOOL (Bow 4, Hammer 3, Scythe 4). Stands are keep fixtures, not Build-menu items.
   gateCost: 6, wallSpacing: 34,
   zoomMin: 0.55, zoomMax: 2.4, zoomStart: 1,
   vagrantEvery: 18, vagrantMax: 4, vagrantStart: 2,
-  buildTime: { wall: 4, tower: 8, farm: 5, house: 6, bow: 5, hammer: 4, scythe: 5, gate: 5 }, repairRate: 14,
+  buildTime: { wall: 4, tower: 8, farm: 5, house: 6, gate: 5 }, repairRate: 14,
   farmEvery: 5, farmCoins: 1,    // a worked farm pays farmCoins every farmEvery s, by day
   coreHome: 280, coreCaptured: 150, coreRetaken: 130, coreKeep: 320,
   waveBase: 2, wavePerNight: 7, wavePerRegion: 2,
@@ -40,12 +40,8 @@ const BLD = {
   fort:  { hp: 260, r: 22, range: 220, cd: 0.8, dmg: 13 },
   farm:  { hp: 70, r: 24 },
   house: { hp: 130, r: 18 },
-  bow:    { hp: 90, r: 16 },
-  hammer: { hp: 90, r: 16 },
-  scythe: { hp: 90, r: 16 },
   gate:   { hp: 140, r: 16 },
 };
-Object.assign(COST, TUNE.standCost);
 COST.gate = TUNE.gateCost;
 
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
@@ -130,7 +126,8 @@ function newGame() {
   zoom = TUNE.zoomStart; applyScale();
   lookX = S.monarch.x; lookY = S.monarch.y;
   pinch = null; wallDrag = null; pts.clear(); ptr = null;
-  toast('Start with your Builder and House. Order a Hammer stand, then drop coins on vagrants and stands', '');
+  clearToasts();
+  toast('Drop coins on vagrants and the tool stands by your keep to grow your kingdom', '');
 }
 function mkBld(type, x, y, rid, built) {
   const spec = BLD[type];
@@ -142,7 +139,10 @@ function mkFolk(role, x, y) {
 function setupHome() {
   const h = S.regions[0];
   for (let i = 0; i < TUNE.startHouses; i++) S.buildings.push(mkBld('house', h.x + 100 + i * 46, h.y - 24, 0, 1));
-  S.stands = [];
+  // Tool stands are fixed keep fixtures (Two Crowns style), not Build-menu buildings.
+  S.stands = [['bow', -72], ['hammer', 0], ['scythe', 72]].map(([tool, dx]) => (
+    { tool, x: h.x + dx, y: h.y + 110, r: 14, paid: 0, tools: 0, built: 1, owner: 'player', region: 0 }
+  ));
   for (let i = 0; i < TUNE.startBuilders; i++) S.folk.push(mkFolk('builder', h.x - 46 + i * 18, h.y + 50));
   // vagrant camp: just inside the nearest wild region, as far from its guardian as possible
   const wild = S.regions.filter(r => r.id !== 0).sort((a, b) => dist(a, h) - dist(b, h))[0];
@@ -163,12 +163,27 @@ function mkCore(r, hp) { return { type: 'core', x: r.x, y: r.y, r: 20, hp, max: 
 const owned = () => S.regions.filter(r => r.owner === 'player');
 
 // ---------- toasts / hint ----------
-function toast(msg, cls) {
+const TOAST_MAX = 2, toastQ = [];
+let toastShowing = 0;
+function clearToasts() {
+  toastQ.length = 0; toastShowing = 0;
   const box = $('toasts');
-  const el = document.createElement('div'); el.className = 'toast ' + (cls || ''); el.textContent = msg;
-  box.appendChild(el); while (box.children.length > 3) box.firstChild.remove();
-  setTimeout(() => el.remove(), 2600);
+  if (box) while (box.firstChild) box.firstChild.remove();
+}
+function pumpToasts() {
+  const box = $('toasts'); if (!box) return;
+  while (toastShowing < TOAST_MAX && toastQ.length) {
+    const { msg, cls } = toastQ.shift();
+    const el = document.createElement('div'); el.className = 'toast ' + (cls || ''); el.textContent = msg;
+    box.appendChild(el);
+    toastShowing++;
+    setTimeout(() => { el.remove(); toastShowing = Math.max(0, toastShowing - 1); pumpToasts(); }, 2600);
+  }
+}
+function toast(msg, cls) {
   (S && (S.toastLog || (S.toastLog = []))).push(msg);
+  toastQ.push({ msg, cls: cls || '' });
+  pumpToasts();
 }
 
 // ---------- input ----------
@@ -370,12 +385,12 @@ function placeBld(type, x, y) {
   const rid = regionIdAt(x, y);
   S.coins -= COST[type];
   const b = mkBld(type, x, y, rid, 0);
-  if (isStandType(type)) { b.tool = type; b.paid = 0; b.tools = 0; S.stands.push(b); }
   S.buildings.push(b);
   floatTxt(x, y - 30, '-' + COST[type], '#ffb0a0');
   return b;
 }
 function tryPlace(type, x, y) {
+  if (isStandType(type)) return toast('Tool stands already stand by your keep', '');
   if (type === 'gate') {
     const hit = S.buildings.find(b => b.type === 'wall' && b.owner === 'player' && dist(b, { x, y }) < (b.r || 16) + 14);
     if (hit) return swapWallForGate(hit);
@@ -430,7 +445,16 @@ function commitWallLine(plan) {
 }
 
 // ---------- coin economy (Kingdom-style coin drops) ----------
-function floatTxt(x, y, txt, col) { S.fx.push({ k: 'txt', x, y, txt, col: col || '#ffd56a', t: 1.1, t0: 1.1 }); }
+function floatTxt(x, y, txt, col) {
+  let nx = x, ny = y;
+  const near = (S.fx || []).filter(f => f.k === 'txt' && Math.hypot(f.x - x, f.y - y) < 46);
+  if (near.length) {
+    const k = near.length;
+    nx += (k % 2 ? 1 : -1) * 26 * Math.ceil(k / 2);
+    ny -= 18 * k;
+  }
+  S.fx.push({ k: 'txt', x: nx, y: ny, txt, col: col || '#ffd56a', t: 1.1, t0: 1.1 });
+}
 function workers() { let n = S.archers.length; for (const f of S.folk) if (f.role !== 'vagrant') n++; return n; }
 function housingCap() {
   let c = S.regions[0].owner === 'player' ? TUNE.keepSlots : 0;
@@ -463,7 +487,7 @@ function applyClaim(t) {
     const c = TOOL[t.tool].cost;
     if (t.paid >= c) {
       t.paid = 0; t.tools++; S.stats.tools++;
-      floatTxt(t.x, t.y - 44, TOOL[t.tool].label + ' ready!', '#d6ffb0');
+      floatTxt(t.x + 28, t.y - 70, TOOL[t.tool].label + ' ready!', '#d6ffb0');
       toast(`${TOOL[t.tool].label} bought — an idle villager will take it`, 'good');
     } else floatTxt(t.x, t.y - 40, t.paid + ' / ' + c, '#ffd56a');
   } else {
@@ -544,7 +568,7 @@ function becomeRole(f, role) {
     f.dead = true;
     S.archers.push({ type: 'archer', x: f.x, y: f.y, r: 10, hp: 40, max: 40, cd: 0, follow: false, post: null, slotA: Math.random() * 6.28 });
   } else { f.role = role; f.job = null; f.tx = null; }
-  floatTxt(f.x, f.y - 34, 'Now a ' + (role === 'archer' ? 'Archer' : role === 'builder' ? 'Builder' : 'Farmer'), '#d6ffb0');
+  floatTxt(f.x + 22, f.y - 52, 'Now a ' + (role === 'archer' ? 'Archer' : role === 'builder' ? 'Builder' : 'Farmer'), '#d6ffb0');
   toast(`A villager became ${role === 'archer' ? 'an Archer' : 'a ' + (role === 'builder' ? 'Builder' : 'Farmer')}`, 'good');
 }
 function updateFolk(dt) {
@@ -765,8 +789,7 @@ function gameOver(why) {
   $('overTitle').textContent = why;
   $('overStats').innerHTML = `Nights survived: <b>${S.nights}</b><br>Regions held: <b>${owned().length}</b><br>Undead slain: <b>${S.kills}</b>`;
   $('over').hidden = false;
-  const box = $('toasts');
-  while (box.firstChild) box.firstChild.remove();
+  clearToasts();
   $('bar').hidden = true; showMenu(false); if (S) S.dropHold = false;
   $('hint').textContent = '';
 }
@@ -2724,7 +2747,8 @@ function render() {
   pileN = 0;
   for (const t of S.trees) if (vis(t.x, t.y)) pushP(t.y, 'tree', t);
   for (const rk of S.rocks) if (vis(rk.x, rk.y)) pushP(rk.y, 'rock', rk);
-  for (const b of S.buildings) if (vis(b.x, b.y)) pushP(b.type === 'farm' && b.built >= 1 ? b.y - 30 : b.y, 'bld', b);
+  for (const b of S.buildings) if (vis(b.x, b.y) && !b.tool) pushP(b.type === 'farm' && b.built >= 1 ? b.y - 30 : b.y, 'bld', b);
+  for (const st of S.stands) if (vis(st.x, st.y)) pushP(st.y, 'stand', st);
   for (const r of S.regions) if (r.core && vis(r.x, r.y)) pushP(r.core.y, 'core', r.core);
   for (const g of S.guardians) if (vis(g.x, g.y)) pushP(g.y, 'guard', g);
   for (const a of S.archers) if (vis(a.x, a.y)) pushP(a.y, 'arch', a);
