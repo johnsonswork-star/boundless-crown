@@ -1440,80 +1440,272 @@ function paintWarden(frame) {
   spr.gy = 52;
   return spr;
 }
-function paintShambler(frame) {
-  const spr = bake(32, 34, g => {
-    const step = frame ? 3 : 0;
-    g.fillStyle = '#6d7a58';
-    g.fillRect(10, 24, 4, 8);
-    g.fillRect(18, 22 - step * 0.3, 3.4, 10);
-    ell(g, 16, 20, 8, 7, '#9aaa78');
-    ell(g, 18, 22, 5, 5, '#7d8c64');
-    ell(g, 8, 18, 3.2, 2.2, '#9aaa78', 0.4);
-    g.strokeStyle = '#7d8c64';
-    g.lineWidth = 3.2;
-    g.beginPath(); g.moveTo(8, 18); g.quadraticCurveTo(2, 24, 4, 30); g.stroke();
-    disc(g, 4, 30, 1.6, '#c5d0a4');
-    ell(g, 20, 12, 5, 4.6, '#c5d0a4', 0.4);
-    disc(g, 18.2, 11.6, 0.7, '#1c2418');
-    disc(g, 21.2, 12.2, 0.7, '#1c2418');
-    g.fillStyle = '#5c6848';
-    g.fillRect(12, 16, 8, 3);
-  });
-  spr.gy = 32;
+// Pale Host. Bodies are baked once per walk frame; a dark rim is stamped
+// around the alpha so the silhouette reads on day grass and on the night veil.
+const HOST_PAD = 4;
+function hostGait(frame) {
+  const f = frame & 3;
+  const s = [1, 0.22, -1, -0.18][f];
+  return {
+    bob: [1.15, -1.55, 1.0, -1.25][f],
+    front: s * 4.4,
+    back: -s * 3.7,
+    arm: s * 2.6,
+    blade: -s * 0.28,
+    hem: s * 2.4,
+    staff: s * 1.15,
+  };
+}
+function capsule(g, x0, y0, x1, y1, r, color) {
+  const len = Math.hypot(x1 - x0, y1 - y0) || 0.001;
+  g.save();
+  g.translate(x0, y0);
+  g.rotate(Math.atan2(y1 - y0, x1 - x0));
+  g.fillStyle = color;
+  g.beginPath();
+  g.arc(0, 0, Math.max(0.2, r), Math.PI / 2, Math.PI * 1.5);
+  g.arc(len, 0, Math.max(0.2, r), Math.PI * 1.5, Math.PI / 2);
+  g.closePath();
+  g.fill();
+  g.restore();
+}
+function limb(g, x0, y0, x1, y1, r, fill, shade) {
+  capsule(g, x0 + 0.55, y0 + 0.75, x1 + 0.55, y1 + 0.75, r, shade);
+  capsule(g, x0 - 0.25, y0 - 0.35, x1 - 0.25, y1 - 0.35, r * 0.92, fill);
+}
+function rimSprite(spr, color, rad) {
+  const pad = HOST_PAD, ps = pad * SPR, o = rad * SPR;
+  const c = document.createElement('canvas');
+  c.width = spr.c.width + ps * 2;
+  c.height = spr.c.height + ps * 2;
+  const g = c.getContext('2d');
+  const dirs = [[o, 0], [-o, 0], [0, o], [0, -o], [o * 0.72, o * 0.72], [-o * 0.72, o * 0.72], [o * 0.72, -o * 0.72], [-o * 0.72, -o * 0.72]];
+  for (let i = 0; i < dirs.length; i++) g.drawImage(spr.c, ps + dirs[i][0], ps + dirs[i][1]);
+  g.globalCompositeOperation = 'source-in';
+  g.fillStyle = color;
+  g.fillRect(0, 0, c.width, c.height);
+  g.globalCompositeOperation = 'source-over';
+  g.drawImage(spr.c, ps, ps);
+  const out = { c, w: spr.w + pad * 2, h: spr.h + pad * 2, gy: spr.gy + pad };
+  if (spr.orb) out.orb = spr.orb;
+  return out;
+}
+function paintHost(spr, fn) {
+  const g = spr.c.getContext('2d');
+  g.setTransform(SPR, 0, 0, SPR, 0, 0);
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  fn(g, HOST_PAD);
+  g.setTransform(1, 0, 0, 1, 0, 0);
   return spr;
+}
+function glowEye(g, x, y, col) {
+  disc(g, x, y, 2.7, 'rgba(255,250,210,.28)');
+  disc(g, x, y, 1.55, col);
+  disc(g, x - 0.35, y - 0.4, 0.48, '#ffffff');
+}
+function paintShambler(frame) {
+  const p = hostGait(frame);
+  const bob = p.bob;
+  const spr = bake(38, 42, g => {
+    const flesh = '#d7e6c4', mid = '#a9c48a', shade = '#6d8656', deep = '#4d6240';
+    const rag = '#6a4e36', ragL = '#a07850', ragD = '#3e2e22';
+    // long dangling arm — the low hook that keeps the silhouette from being a blob
+    limb(g, 13, 22 + bob, 5.2, 35.2 + p.arm * 0.2, 2.35, mid, deep);
+    disc(g, 4.8, 36.2 + p.arm * 0.2, 2.05, '#f4efe4');
+    disc(g, 3.4, 37.2 + p.arm * 0.2, 1.1, '#f4efe4');
+    limb(g, 15, 28 + bob, 12.2 + p.back, 37.4, 2.6, shade, deep);
+    ell(g, 12.2 + p.back, 38.5, 3.2, 1.5, ragD);
+    // hunched mass, back high, chest falling toward the head
+    ell(g, 16.2, 24.2 + bob, 9.4, 7.2, deep, 0.85);
+    ell(g, 15.4, 23.2 + bob, 8.6, 6.5, shade, 0.78);
+    ell(g, 14.2, 22.2 + bob, 7.0, 5.2, mid, 0.7);
+    ell(g, 12.2, 20.4 + bob, 3.1, 2.2, 'rgba(255,252,236,.4)', 0.4);
+    disc(g, 11.2, 19.2 + bob, 2.15, '#efe6d4');
+    // torn cloth hanging off the chest, not a pack on the back
+    poly(g, [[14, 21 + bob], [22, 22 + bob], [20, 27 + bob], [13, 26 + bob]], rag);
+    poly(g, [[15, 21.2 + bob], [19, 21.6 + bob], [18, 24.5 + bob], [15, 24 + bob]], ragL);
+    poly(g, [[14.5, 25.5 + bob], [17.2, 26.2 + bob], [15.6, 36.2 + p.hem * 0.25], [12.4, 33]], ragD);
+    poly(g, [[18.2, 26 + bob], [21.2, 27 + bob], [22.6, 35.4 + p.hem * 0.2], [17.4, 32.5]], rag);
+    limb(g, 19, 29 + bob, 23 + p.front, 37.5, 2.75, mid, shade);
+    ell(g, 23.2 + p.front, 38.6, 3.5, 1.65, '#2c2418');
+    ell(g, 22.6 + p.front, 38.2, 2.3, 1.0, '#5c4632');
+    ell(g, 26.6, 19.6 + bob, 6.0, 5.2, deep, 0.4);
+    ell(g, 26.1, 18.8 + bob, 5.5, 4.7, flesh, 0.32);
+    ell(g, 24.2, 17.2 + bob, 2.4, 1.6, 'rgba(255,252,236,.7)', 0.25);
+    g.strokeStyle = '#3a3228';
+    g.lineWidth = 0.9;
+    g.beginPath();
+    g.moveTo(27.6, 21.2 + bob); g.quadraticCurveTo(29.4, 22.5 + bob, 30.8, 21.2 + bob);
+    g.stroke();
+    limb(g, 22, 22 + bob, 31.2, 27.2 + p.arm, 2.2, mid, shade);
+    disc(g, 31.8, 27.8 + p.arm, 1.9, '#f3ecdc');
+    disc(g, 33.3, 28.4 + p.arm, 1.0, '#f3ecdc');
+  });
+  spr.gy = 39.6;
+  const out = rimSprite(spr, '#1a2414', 1.35);
+  return paintHost(out, (g, pad) => {
+    const y = 18.4 + bob + pad, x = 26.6 + pad;
+    glowEye(g, x, y, '#e6ff66');
+    glowEye(g, x + 2.7, y + 0.7, '#f4ff9a');
+  });
 }
 function paintSkeleton(frame) {
-  const spr = bake(28, 36, g => {
-    const step = frame ? 2 : 0;
-    g.strokeStyle = '#e7e0d4';
-    g.lineWidth = 2.2;
+  const p = hostGait(frame);
+  const bob = p.bob;
+  const spr = bake(46, 50, g => {
+    g.translate(2, 1);
+    const bone = '#f7f3ea', boneD = '#d9d0c0', boneS = '#b7ab98';
+    const hole = '#241c16';
+    limb(g, 14, 22 + bob, 7.5, 32 + p.arm * 0.45, 1.85, boneD, boneS);
+    disc(g, 7.2, 33.2 + p.arm * 0.45, 1.7, bone);
+    limb(g, 15, 32 + bob, 12 + p.back, 42.2, 2.05, boneD, boneS);
+    disc(g, 12 + p.back, 43.2, 1.85, bone);
+    ell(g, 16, 32.2 + bob, 4.6, 2.5, boneS);
+    ell(g, 15.4, 31.5 + bob, 3.6, 1.8, bone);
+    // ribcage as a solid bone shape, not hairline strokes
+    ell(g, 16.2, 25.2 + bob, 6.0, 6.6, boneS);
+    ell(g, 15.6, 24.4 + bob, 5.3, 5.8, bone);
+    ell(g, 13.8, 22.6 + bob, 2.5, 2.2, 'rgba(255,255,255,.55)');
+    g.strokeStyle = hole;
+    g.lineWidth = 1.25;
     g.beginPath();
-    g.moveTo(11, 24); g.lineTo(10, 33);
-    g.moveTo(17, 24); g.lineTo(18 + step, 33);
-    g.moveTo(8, 18); g.lineTo(3, 26);
-    g.moveTo(18, 16); g.lineTo(24, 22);
+    for (let i = 0; i < 3; i++) {
+      const y = 22.6 + bob + i * 2.35;
+      g.moveTo(12.4, y); g.lineTo(19.4, y + 0.45);
+    }
+    g.moveTo(15.6, 20.6 + bob); g.lineTo(15.6, 30.2 + bob);
     g.stroke();
-    ell(g, 14, 20, 5, 6, '#e7e0d4');
-    g.strokeStyle = '#b7ad9e';
-    g.lineWidth = 0.8;
-    g.beginPath();
-    g.moveTo(11, 18); g.lineTo(17, 18);
-    g.moveTo(11.5, 20.5); g.lineTo(16.5, 20.5);
-    g.moveTo(12, 23); g.lineTo(16, 23);
-    g.stroke();
-    disc(g, 14, 10, 4.4, '#f4f0e8');
-    disc(g, 12.4, 9.6, 1, '#2a241c');
-    disc(g, 15.8, 9.6, 1, '#2a241c');
-    poly(g, [[12, 12.2], [14, 13.6], [16, 12.2]], '#2a241c');
-    g.strokeStyle = '#d9d0c2';
-    g.lineWidth = 1.6;
-    g.beginPath(); g.moveTo(22, 20); g.lineTo(26, 8); g.stroke();
+    limb(g, 17, 33 + bob, 21.5 + p.front, 42.4, 2.15, bone, boneD);
+    disc(g, 21.6 + p.front, 43.4, 2.0, boneD);
+    // sword arm and a chunky rusty blade — the silhouette key
+    const hx = 24.2, hy = 24.6 + bob + p.arm * 0.25;
+    limb(g, 19, 21.5 + bob, hx, hy, 1.9, bone, boneD);
+    disc(g, hx, hy, 1.75, bone);
+    g.save();
+    g.translate(hx, hy);
+    g.rotate(-0.62 + p.blade);
+    capsule(g, -1, 0.2, -5.2, 0.6, 1.15, '#5c4030');
+    g.fillStyle = '#8d6234';
+    g.fillRect(-1.3, -3.3, 2.5, 6.6);
+    g.fillStyle = '#e6d2b0';
+    g.fillRect(-1.3, -3.3, 2.5, 1.1);
+    poly(g, [[0.7, -1.55], [18.2, -0.35], [0.7, 1.55]], '#6e3018');
+    poly(g, [[0.7, -1.2], [17.4, -0.28], [0.7, 0.12]], '#c4622a');
+    poly(g, [[0.75, -1.0], [16.6, -0.22], [0.75, -0.12]], '#f3d7a8');
+    g.restore();
+    // skull
+    limb(g, 16, 18.2 + bob, 16.2, 14.6 + bob, 1.7, boneD, boneS);
+    disc(g, 16.2, 11.2 + bob, 6.15, boneS);
+    disc(g, 15.7, 10.6 + bob, 5.7, bone);
+    ell(g, 13.6, 8.8 + bob, 2.4, 1.7, 'rgba(255,255,255,.7)');
+    ell(g, 13.6, 11.0 + bob, 1.85, 2.15, hole);
+    ell(g, 18.0, 11.2 + bob, 1.7, 2.0, hole);
+    poly(g, [[15.2, 12.6 + bob], [16.5, 14.4 + bob], [14.2, 14.3 + bob]], hole);
+    g.fillStyle = hole;
+    g.fillRect(13.4, 14.7 + bob, 5.2, 1.45);
+    g.fillStyle = bone;
+    for (let i = 0; i < 4; i++) g.fillRect(13.65 + i * 1.25, 14.85 + bob, 0.72, 1.15);
   });
-  spr.gy = 34;
-  return spr;
+  spr.gy = 45.5;
+  const out = rimSprite(spr, '#3a3228', 1.3);
+  return paintHost(out, (g, pad) => {
+    const y = 10.7 + bob + 1 + pad;
+    glowEye(g, 13.6 + 2 + pad, y, '#ffd56a');
+    glowEye(g, 18.0 + 2 + pad, y + 0.2, '#ffe7a8');
+  });
+}
+function paintNecroOrb() {
+  return bake(32, 32, g => {
+    const grd = g.createRadialGradient(16, 16, 0.5, 16, 16, 15);
+    grd.addColorStop(0, 'rgba(255,252,255,.98)');
+    grd.addColorStop(0.18, 'rgba(236,214,255,.95)');
+    grd.addColorStop(0.42, 'rgba(176,120,245,.72)');
+    grd.addColorStop(0.7, 'rgba(120,60,210,.28)');
+    grd.addColorStop(1, 'rgba(90,40,170,0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 32, 32);
+  });
 }
 function paintNecro(frame) {
-  const spr = bake(34, 52, g => {
-    const sway = frame ? 2 : -1;
-    g.fillStyle = '#241c38';
-    g.beginPath(); g.moveTo(17, 16); g.lineTo(30, 46); g.quadraticCurveTo(17, 42 + sway, 4, 48); g.closePath(); g.fill();
-    g.fillStyle = '#3a3058';
-    g.beginPath(); g.moveTo(17, 16); g.lineTo(8, 46); g.quadraticCurveTo(14, 36, 17, 22); g.fill();
-    g.fillStyle = '#4a4068';
-    poly(g, [[6, 40], [2, 50], [12, 44]], '#4a4068');
-    disc(g, 17, 14, 5, '#d9d3c4');
-    g.fillStyle = '#241c38';
-    g.beginPath(); g.arc(17, 13, 5.4, Math.PI * 0.95, Math.PI * 2.05); g.quadraticCurveTo(24, 4, 17, 2); g.quadraticCurveTo(10, 4, 11, 13); g.fill();
-    disc(g, 15.4, 14, 0.7, '#9dff7a');
-    disc(g, 18.6, 14, 0.7, '#9dff7a');
-    g.strokeStyle = '#6b5a3a';
-    g.lineWidth = 1.8;
-    g.beginPath(); g.moveTo(26, 46); g.lineTo(28, 6); g.stroke();
-    disc(g, 28, 6, 2.4, '#1a2218');
+  const p = hostGait(frame);
+  const bob = p.bob;
+  const NX = 1, NY = 7;
+  const spr = bake(44, 68, g => {
+    g.translate(NX, NY);
+    const robe = '#6e52a8', robeL = '#cbb8f0', robeD = '#3e2874', robeS = '#2a1a52';
+    const sx = 26.2 + p.staff * 0.55;
+    // cloak: narrow shoulders, wide tattered hem — not an egg
+    g.fillStyle = robeS;
+    g.beginPath();
+    g.moveTo(20, 22 + bob);
+    g.quadraticCurveTo(31, 23 + bob, 32.5, 40);
+    g.quadraticCurveTo(33.5, 50, 28, 55.5 + p.hem);
+    g.quadraticCurveTo(22, 51, 16.5, 56.2 - p.hem * 0.55);
+    g.quadraticCurveTo(10, 52, 9.5, 38);
+    g.quadraticCurveTo(9, 26 + bob, 15, 22 + bob);
+    g.quadraticCurveTo(17.5, 20.5 + bob, 20, 22 + bob);
+    g.closePath();
+    g.fill();
+    g.fillStyle = robeD;
+    g.beginPath();
+    g.moveTo(20, 22 + bob);
+    g.quadraticCurveTo(16, 28 + bob, 12.5, 40);
+    g.quadraticCurveTo(13, 50, 17, 54);
+    g.quadraticCurveTo(21, 48, 20.5, 32 + bob);
+    g.closePath();
+    g.fill();
+    g.fillStyle = robe;
+    g.beginPath();
+    g.moveTo(16, 23 + bob);
+    g.quadraticCurveTo(13, 30 + bob, 13.5, 42);
+    g.quadraticCurveTo(15, 49, 18.5, 46);
+    g.quadraticCurveTo(16.5, 34 + bob, 18, 24 + bob);
+    g.closePath();
+    g.fill();
+    ell(g, 15.2, 28 + bob, 2.6, 5.4, 'rgba(244,236,255,.38)', -0.6);
+    poly(g, [[12, 52], [16, 50.6], [14.2, 57.4 + p.hem * 0.25]], robeS);
+    poly(g, [[22, 52.2], [27.5, 51.2], [25.6, 57.8 - p.hem * 0.2]], robeD);
+    poly(g, [[17.5, 53.2], [21, 52.2], [19.4, 57]], robeS);
+    // pointed hood, separate from the shoulders
+    g.fillStyle = robeS;
+    g.beginPath();
+    g.moveTo(15.2, 22 + bob);
+    g.lineTo(20.2, 5.2 + bob);
+    g.lineTo(26.8, 22 + bob);
+    g.quadraticCurveTo(21, 26.5 + bob, 15.2, 22 + bob);
+    g.closePath();
+    g.fill();
+    g.fillStyle = robeL;
+    g.beginPath();
+    g.moveTo(16.4, 21 + bob);
+    g.lineTo(20.2, 6.4 + bob);
+    g.lineTo(19.2, 20.5 + bob);
+    g.closePath();
+    g.fill();
+    ell(g, 21.4, 17.2 + bob, 3.8, 4.2, '#140e22');
+    // one clasp, not a row of buttons
+    disc(g, 18.6, 30 + bob, 1.65, '#e6d6ff');
+    disc(g, 18.6, 30 + bob, 0.7, '#fff8ff');
+    // staff in the hand, crooked, rising above the hood
+    limb(g, sx + 0.4, 50, sx - 0.6, 3.2, 1.55, '#8a6240', '#3e2a1c');
+    capsule(g, sx + 0.05, 48, sx - 0.7, 6, 0.62, '#e2c49a');
+    disc(g, sx - 1.2, 32 + bob, 2.05, '#f3ecdc');
+    disc(g, sx + 0.4, 32.6 + bob, 1.15, '#f3ecdc');
+    ell(g, 18 + p.front * 0.4, 55.4, 3.2, 1.4, '#e7dfd0');
+    disc(g, sx - 0.5, 2.6, 2.7, '#2a1848');
+    disc(g, sx - 0.7, 2.3, 1.7, '#f6ecff');
   });
-  spr.gy = 48;
-  spr.orb = { dx: 28 - 17, dy: 6 - 48 };
-  return spr;
+  const orbX = (26.2 + p.staff * 0.55 - 0.7) + NX;
+  const orbY = 2.3 + NY;
+  spr.gy = 56 + NY;
+  spr.orb = { dx: orbX - 22, dy: orbY - spr.gy };
+  const out = rimSprite(spr, '#1c1030', 1.35);
+  return paintHost(out, (g, pad) => {
+    const y = 16.8 + bob + NY + pad;
+    glowEye(g, 19.8 + NX + pad, y, '#f0dcff');
+    glowEye(g, 23.0 + NX + pad, y + 0.3, '#f6e8ff');
+  });
 }
 
 
@@ -1823,9 +2015,15 @@ function buildArt() {
   Art.archerRally = [0, 1, 2].map(f => paintArcher(f, true));
   Art.guardian = [0, 1].map(paintGuardian);
   Art.warden = [0, 1].map(paintWarden);
-  Art.shambler = [0, 1].map(paintShambler);
-  Art.skeleton = [0, 1].map(paintSkeleton);
-  Art.necro = [0, 1].map(paintNecro);
+  Art.shambler = [0, 1, 2, 3].map(paintShambler);
+  Art.skeleton = [0, 1, 2, 3].map(paintSkeleton);
+  Art.necro = [0, 1, 2, 3].map(paintNecro);
+  Art.necroOrb = paintNecroOrb();
+  Art.undeadGlow = {
+    shambler: paintRadial(56, 56, [[0, 'rgba(214,235,170,.5)'], [0.45, 'rgba(170,200,120,.14)'], [1, 'rgba(140,170,90,0)']]),
+    skeleton: paintRadial(56, 56, [[0, 'rgba(255,244,214,.48)'], [0.45, 'rgba(230,200,150,.13)'], [1, 'rgba(230,200,150,0)']]),
+    necro: paintRadial(72, 72, [[0, 'rgba(214,180,255,.72)'], [0.4, 'rgba(150,80,230,.22)'], [1, 'rgba(90,40,180,0)']]),
+  };
   Art.folk = {
     vagrant: ['idle', 'walk0', 'walk1'].map(p => paintFolk('vagrant', p)),
     villager: ['idle', 'walk0', 'walk1', 'pickup'].map(p => paintFolk('villager', p)),
@@ -2470,29 +2668,64 @@ function drawGuardian(g) {
   flashAt(g.x, g.y - 12, 12, 16, g.flash);
   bar(g.x, g.y + 4 - spr.gy * sc - 6, 52, g.hp / g.max, '#e15a4a');
 }
+function undeadFrame(u, walking) {
+  if (!walking) return 0;
+  const rate = u.kind === 'skeleton' ? 9 : u.kind === 'necro' ? 5.5 : 7;
+  return ((S.t * rate + u.x * 0.37) | 0) & 3;
+}
+function undeadSet(u) {
+  return u.kind === 'necro' ? Art.necro : u.kind === 'skeleton' ? Art.skeleton : Art.shambler;
+}
 function drawUndead(u) {
   const mot = actorMotion(u);
+  const fr = undeadFrame(u, mot.walking);
+  const bob = mot.walking ? Math.sin(S.t * (u.kind === 'skeleton' ? 12 : 8) + u.y) * 0.8 : Math.sin(S.t * 2 + u.x) * 0.45;
+  u._fr = fr;
+  u._visBob = bob;
+  const spr = undeadSet(u)[fr] || undeadSet(u)[0];
   if (u.kind === 'necro') {
     ctx.save();
-    ctx.translate(u.x, u.y + 2);
-    ctx.strokeStyle = S.chaos ? 'rgba(140,140,140,.55)' : 'rgba(170,255,140,.75)';
-    ctx.lineWidth = 1.6;
-    ctx.beginPath(); ctx.ellipse(0, 0, 16, 7, S.t * 0.6, 0, Math.PI * 2); ctx.stroke();
+    ctx.translate(u.x, u.y + 3);
+    const live = !S.chaos;
+    ctx.strokeStyle = live ? 'rgba(186,150,255,.8)' : 'rgba(180,180,170,.4)';
+    ctx.lineWidth = 1.7;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 16, 6.2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = live ? 'rgba(236,220,255,.9)' : 'rgba(210,210,200,.45)';
+    ctx.lineWidth = 1.15;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 11.5, 4.3, S.t * 0.7, 0, Math.PI * 1.4);
+    ctx.stroke();
     ctx.restore();
-  }
-  shadow(u.x, u.y + 3, u.kind === 'necro' ? 10 : 8, 3.6);
-  const set = u.kind === 'necro' ? Art.necro : u.kind === 'skeleton' ? Art.skeleton : Art.shambler;
-  const spr = set[mot.fr];
-  blit(spr, u.x, u.y + 3, mot);
-  if (u.kind === 'necro') {
-    const pulse = 0.85 + Math.sin(S.t * 5) * 0.2;
-    const ox = mot.flip ? -spr.orb.dx : spr.orb.dx;
-    ctx.globalAlpha = 0.9;
-    ctx.drawImage(Art.orb.c, u.x + ox - 7 * pulse, u.y + 3 + mot.bob + spr.orb.dy - 7 * pulse, 14 * pulse, 14 * pulse);
+    const pulse = 0.92 + Math.sin(S.t * 3 + u.x) * 0.08;
+    ctx.globalAlpha = 0.5;
+    const gw = 34 * pulse;
+    ctx.drawImage(Art.undeadGlow.necro.c, u.x - gw / 2, u.y - 30, gw, gw);
     ctx.globalAlpha = 1;
   }
-  flashAt(u.x, u.y - 8, 8, 10, u.flash);
-  if (u.hp < u.max) bar(u.x, u.y - 20, 26, u.hp / u.max, '#e15a4a');
+  shadow(u.x + 1.5, u.y + 3, u.kind === 'necro' ? 12 : u.kind === 'skeleton' ? 8 : 10, u.kind === 'necro' ? 4.3 : 3.3);
+  // Once night has settled, drawUndeadRims redraws the sprite above the veil.
+  const lift = S.nightK < 0.92;
+  if (lift) {
+    blit(spr, u.x, u.y + 3, { flip: mot.flip, bob });
+    if (u.kind === 'necro' && spr.orb && Art.necroOrb) {
+      const pulse = 0.8 + Math.sin(S.t * 5 + u.x) * 0.2;
+      const ox = mot.flip ? -spr.orb.dx : spr.orb.dx;
+      const size = 18 * pulse;
+      ctx.globalAlpha = 0.95;
+      ctx.drawImage(Art.necroOrb.c, u.x + ox - size / 2, u.y + 3 + bob + spr.orb.dy - size / 2, size, size);
+      ctx.globalAlpha = 1;
+    }
+  }
+  if (u.flash > 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = Math.min(0.9, u.flash * 7.5);
+    blit(spr, u.x, u.y + 3, { flip: mot.flip, bob });
+    ctx.restore();
+  }
+  if (u.hp < u.max) bar(u.x, u.y + 3 - spr.gy - 6, u.kind === 'necro' ? 32 : 26, u.hp / u.max, '#e15a4a');
 }
 function drawReed(r) {
   const pale = S.regions[r.rid].owner === 'pale';
@@ -2678,26 +2911,38 @@ function drawNight() {
 }
 function drawUndeadRims() {
   const k = S.nightK;
-  if (k < 0.12) return;
+  if (k < 0.12 || !S.undead.length) return;
   const a = Math.min(1, k);
-  for (const u of S.undead) {
-    if (!vis(u.x, u.y)) continue;
-    const p = w2s(u.x, u.y - 10);
-    const big = u.kind === 'necro';
-    const rx = (big ? 18 : 13) * scale, ry = (big ? 24 : 16) * scale;
-    ctx.beginPath();
-    ctx.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fillStyle = big ? `rgba(186,255,150,${0.55 * a})` : `rgba(244,255,232,${0.62 * a})`;
-    ctx.fill();
-    ctx.strokeStyle = big ? `rgba(198,255,138,${0.95 * a})` : `rgba(240,255,226,${0.95 * a})`;
-    ctx.lineWidth = big ? 2.4 : 2;
-    ctx.stroke();
-    ctx.fillStyle = big ? '#d6ff8a' : '#f7fff2';
-    const eye = Math.max(1.7, 2.15 * scale);
-    const flip = u._flip ? -1 : 1;
-    ctx.beginPath(); ctx.arc(p.x + flip * rx * 0.2, p.y - ry * 0.12, eye, 0, 6.3); ctx.fill();
-    ctx.beginPath(); ctx.arc(p.x + flip * rx * 0.46, p.y - ry * 0.06, eye, 0, 6.3); ctx.fill();
+  const list = [];
+  for (const u of S.undead) if (vis(u.x, u.y)) list.push(u);
+  list.sort((p, q) => p.y - q.y);
+  for (const u of list) {
+    const spr = undeadSet(u)[u._fr | 0] || undeadSet(u)[0];
+    const bob = u._visBob || 0;
+    const feet = w2s(u.x, u.y + 3 + bob);
+    const glow = (Art.undeadGlow && Art.undeadGlow[u.kind]) || Art.undeadGlow.shambler;
+    const hs = (u.kind === 'necro' ? 58 : 40) * scale;
+    ctx.save();
+    ctx.translate(feet.x, feet.y);
+    if (u._flip) ctx.scale(-1, 1);
+    ctx.globalAlpha = (u.kind === 'necro' ? 0.7 : 0.36) * a;
+    ctx.drawImage(glow.c, -hs * 0.5, -spr.gy * scale * 0.55 - hs * 0.28, hs, hs);
+    ctx.globalAlpha = a;
+    ctx.drawImage(spr.c, -spr.w * scale / 2, -spr.gy * scale, spr.w * scale, spr.h * scale);
+    if (u.kind === 'necro' && spr.orb && Art.necroOrb) {
+      const pulse = 0.82 + Math.sin(S.t * 5 + u.x) * 0.18;
+      const size = 20 * pulse * scale;
+      ctx.globalAlpha = 0.95 * a;
+      ctx.drawImage(Art.necroOrb.c, spr.orb.dx * scale - size / 2, spr.orb.dy * scale - size / 2, size, size);
+    }
+    if (u.flash > 0) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.min(0.9, u.flash * 7.5);
+      ctx.drawImage(spr.c, -spr.w * scale / 2, -spr.gy * scale, spr.w * scale, spr.h * scale);
+    }
+    ctx.restore();
   }
+  ctx.globalAlpha = 1;
 }
 function drawEdgeArrow(ex, ey, ang, fill) {
   ctx.save();
