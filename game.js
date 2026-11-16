@@ -5,7 +5,7 @@
 const W = 2400, H = 2400, CX = W / 2, CY = H / 2;
 const DAY = 60, NIGHT = 45, CELL = 8, GW = W / CELL, GH = H / CELL;
 const COST = { wall: 4, tower: 12, farm: 8, house: 6 };
-const NICE = { wall: 'Wall', tower: 'Tower', farm: 'Farm', house: 'House', fort: 'Fort', gate: 'Gate', bow: 'Bow stand', hammer: 'Hammer stand', scythe: 'Scythe stand' };
+const NICE = { wall: 'Wall', tower: 'Tower', farm: 'Farm', house: 'House', fort: 'Fort', gate: 'Gate', bow: 'Bow stand', hammer: 'Hammer stand', scythe: 'Scythe stand', clear: 'Clear' };
 const TOOL = {
   bow:    { cost: 4, role: 'archer',  label: 'Bow' },
   hammer: { cost: 3, role: 'builder', label: 'Hammer' },
@@ -28,6 +28,9 @@ const TUNE = {
   necroRaiseEvery: 5, leaderDmg: 1.25,
   guardianLeash: 220, rallyRange: 280, folkSpeed: 72,
   monarchRegen: 4, // HP/s out of combat, day only — never at night
+  treeCoin: 2, rockCoin: 3, // coins dropped when a Builder finishes a marked tree / rock
+  clearTime: { tree: 4, rock: 5 }, // seconds for a Builder to chop or break
+  clearMarkRange: 170, // monarch must be this close to mark a tree or rock
 };
 const DEBUG = new URLSearchParams(location.search).get('debug') === '1';
 const NAMES = ['Crownhold', 'Ashford', 'Briarmoor', 'Coldwater', 'Duskfen', 'Elmreach', 'Frostgate', 'Gloamwood'];
@@ -99,7 +102,7 @@ function newGame() {
     spawnQ: [], spawnT: 0, spawnGap: 1, leader: null, chaos: false, focus: null, waveSrc: null,
     build: null, over: false, kills: 0, mapDirty: true,
     stats: { towerShots: 0, paleTowerShots: 0, spawned: 0, captures: 0, losses: 0, retakes: 0,
-      dropped: 0, recruits: 0, tools: 0, roles: 0, built: 0, farmCoins: 0, raised: 0, folkLost: 0 },
+      dropped: 0, recruits: 0, tools: 0, roles: 0, built: 0, farmCoins: 0, raised: 0, folkLost: 0, cleared: 0, clearCoins: 0 },
     monarch: { x: 0, y: 0, r: 16, hp: 120, max: 120, cd: 0, target: null, speed: 190, vx: 0, vy: 0, face: 0 },
     nightK: 0, waveSide: null,
   };
@@ -318,6 +321,7 @@ function setBuild(t) {
   if (!t) { $('hint').textContent = ''; lookFree = false; }
   else if (t === 'wall') $('hint').textContent = `Drag to lay a Wall · ${COST.wall} coins each · drag to a screen edge to scroll, two fingers to look around · Cancel to stop`;
   else if (t === 'gate') $('hint').textContent = `Tap to place a Gate, or tap a Wall to swap · ${COST.gate} coins · drag to look around`;
+  else if (t === 'clear') $('hint').textContent = `Tap a tree or rock near you to mark it · free · a Builder chops it · trees drop ${TUNE.treeCoin} coins, rocks ${TUNE.rockCoin} · drag to look around`;
   else $('hint').textContent = `Tap your land to order a ${NICE[t]} · ${COST[t]} coins · drag to look around`;
 }
 function isStandType(t) { return !!TOOL[t]; }
@@ -366,13 +370,68 @@ function w2s(wx, wy) { const c = camera(); return { x: (wx - c.x) * scale + vw /
 function onTap(sx, sy) {
   if (S.over) return;
   const w = s2w(sx, sy);
+  if (S.build === 'clear') return tryMarkDecor(w.x, w.y, true);
   if (S.build) return tryPlace(S.build, w.x, w.y);
+  if (tryMarkDecor(w.x, w.y, false)) return;
   // tap an enemy to focus it
   let best = null, bd = 45 / scale;
   for (const e of enemiesList()) { const d = dist(e, w) - e.r; if (d < bd) { bd = d; best = e; } }
   if (best) { S.monarch.target = best; if (dist(best, S.monarch) > 90) toast('Target set — move closer to strike'); }
 }
 
+function decorKind(o) { return o && o.kind ? o.kind : (S.trees.includes(o) ? 'tree' : S.rocks.includes(o) ? 'rock' : null); }
+function isClearJob(j) {
+  if (!j || !j.marked || (j.prog || 0) >= 1) return false;
+  const k = decorKind(j);
+  return k === 'tree' ? S.trees.includes(j) : k === 'rock' ? S.rocks.includes(j) : false;
+}
+function decorAt(x, y, rad) {
+  let best = null, bd = rad;
+  const pt = { x, y };
+  for (const t of S.trees) { const d = dist(t, pt) - (t.r || 16); if (d < bd) { bd = d; best = t; } }
+  for (const rk of S.rocks) { const d = dist(rk, pt) - (rk.r || 12); if (d < bd) { bd = d; best = rk; } }
+  return best;
+}
+function markClear(obj) {
+  if (!obj) return null;
+  if (obj.marked) return obj;
+  obj.marked = true; obj.prog = 0;
+  const k = decorKind(obj), n = k === 'rock' ? TUNE.rockCoin : TUNE.treeCoin;
+  toast(k === 'rock' ? `Rock marked — a Builder will break it (drops ${n} coins)` : `Tree marked — a Builder will chop it (drops ${n} coins)`);
+  return obj;
+}
+function tryMarkDecor(x, y, mode) {
+  const rad = Math.max(36, 48 / scale);
+  const hit = decorAt(x, y, rad);
+  if (!hit) { if (mode) toast('Tap a tree or rock to mark it'); return null; }
+  if (dist(hit, S.monarch) > TUNE.clearMarkRange) {
+    if (mode) toast('Move closer to mark that', 'bad');
+    return mode ? null : null;
+  }
+  if (hit.marked) { if (mode) toast(decorKind(hit) === 'rock' ? 'Rock already marked' : 'Tree already marked'); return hit; }
+  return markClear(hit);
+}
+function dropLoot(x, y, n) {
+  for (let i = 0; i < n; i++) {
+    S.drops.push({
+      x: x + (Math.random() - .5) * 18, y: y + 8 + (Math.random() - .5) * 10,
+      z: 22 + i * 8, vz: -50 - i * 8, landed: false, away: true, age: 0, tryT: 0, loot: true
+    });
+  }
+}
+function finishClear(obj) {
+  const k = decorKind(obj); if (!k) return;
+  const arr = k === 'tree' ? S.trees : S.rocks;
+  const i = arr.indexOf(obj); if (i < 0) return;
+  arr.splice(i, 1);
+  const n = k === 'rock' ? TUNE.rockCoin : TUNE.treeCoin;
+  dropLoot(obj.x, obj.y, n);
+  S.stats.cleared++; S.stats.clearCoins += n;
+  S.fx.push({ k: 'puff', x: obj.x, y: obj.y, t: 0.55, t0: 0.55, big: 1 });
+  floatTxt(obj.x, obj.y - 36, '+' + n, '#ffd56a');
+  toast(k === 'rock' ? `Rock broken — ${n} coins on the ground` : `Tree felled — ${n} coins on the ground`, 'good');
+  for (const f of S.folk) if (f.job === obj) f.job = null;
+}
 function placeBlocked(type, x, y, extra) {
   if (x < 20 || y < 20 || x > W - 20 || y > H - 20) return 'Out of bounds';
   const rid = regionIdAt(x, y), r = S.regions[rid];
@@ -392,6 +451,8 @@ function placeBlocked(type, x, y, extra) {
     for (const o of extra.others) if (dist(o, { x, y }) < rr + (o.r || rr) + 2) return 'Spot taken';
   }
   if (isStandType(type) && S.stands.some(st => st.tool === type && st.region === rid && st.owner === 'player')) return 'This land already has a ' + NICE[type];
+  for (const t of S.trees) if (dist(t, { x, y }) < (t.r || 16) + rr + 2) return 'Clear the tree first';
+  for (const rk of S.rocks) if (dist(rk, { x, y }) < (rk.r || 12) + rr + 2) return 'Clear the rock first';
   return null;
 }
 function swapWallForGate(wall) {
@@ -415,6 +476,7 @@ function placeBld(type, x, y) {
   return b;
 }
 function tryPlace(type, x, y) {
+  if (type === 'clear') return tryMarkDecor(x, y, true);
   if (type === 'gate') {
     const hit = S.buildings.find(b => b.type === 'wall' && b.owner === 'player' && dist(b, { x, y }) < (b.r || 16) + 14);
     if (hit) return swapWallForGate(hit);
@@ -533,11 +595,13 @@ function updateDrops(dt) {
     d.tryT -= dt;
     if (d.tryT <= 0) {
       d.tryT = 0.4;
-      const t = claimTarget(d);
-      if (t) { d.dead = true; S.fx.push({ k: 'cfly', x: d.x, y: d.y, tx: t.x, ty: t.y - 16, t: 0.32, t0: 0.32 }); applyClaim(t); continue; }
-      if (d.noHouse && !d.warned) { d.warned = true; toast('No free housing — build a House first', 'bad'); }
+      if (!d.loot) {
+        const t = claimTarget(d);
+        if (t) { d.dead = true; S.fx.push({ k: 'cfly', x: d.x, y: d.y, tx: t.x, ty: t.y - 16, t: 0.32, t0: 0.32 }); applyClaim(t); continue; }
+        if (d.noHouse && !d.warned) { d.warned = true; toast('No free housing — build a House first', 'bad'); }
+      }
     }
-    if (d.away && d.age > TUNE.pickupGrace && dist(d, m) < 26) { d.dead = true; S.coins++; floatTxt(m.x + 14, m.y - 50, '+1', '#ffd56a'); }
+    if ((d.away || d.loot) && d.age > TUNE.pickupGrace && dist(d, m) < 26) { d.dead = true; S.coins++; floatTxt(m.x + 14, m.y - 50, '+1', '#ffd56a'); }
   }
   if (S.drops.some(d => d.dead)) S.drops = S.drops.filter(d => !d.dead);
 }
@@ -569,6 +633,7 @@ function wanderAround(f, cx, cy, rad, dt, sp) {
 }
 function jobValid(j) {
   if (!j) return false;
+  if (isClearJob(j)) return true;
   if (j.type === 'core') { const r = S.regions[j.region]; return r.core === j && r.owner === 'player' && j.hp < j.max; }
   return S.buildings.includes(j) && j.owner === 'player' && (j.built < 1 || j.hp < j.max);
 }
@@ -578,6 +643,8 @@ function pickBuildJob(f, night) {
   for (const b of S.buildings) if (b.owner === 'player' && b.built < 1) {
     const d = dist(b, f) + (taken.has(b) ? 600 : 0); if (d < bd) { bd = d; best = b; }
   }
+  for (const t of S.trees) if (t.marked && (t.prog || 0) < 1) { const d = dist(t, f) + (taken.has(t) ? 600 : 0); if (d < bd) { bd = d; best = t; } }
+  for (const rk of S.rocks) if (rk.marked && (rk.prog || 0) < 1) { const d = dist(rk, f) + (taken.has(rk) ? 600 : 0); if (d < bd) { bd = d; best = rk; } }
   if (best || night) return best;
   for (const b of S.buildings) if (b.owner === 'player' && b.built >= 1 && b.hp < b.max - 0.5) { const d = dist(b, f) + (taken.has(b) ? 600 : 0); if (d < bd) { bd = d; best = b; } }
   for (const r of owned()) if (r.core && r.core.hp < r.core.max - 0.5) { const d = dist(r.core, f) + (taken.has(r.core) ? 600 : 0); if (d < bd) { bd = d; best = r.core; } }
@@ -643,7 +710,7 @@ function updateFolk(dt) {
       wanderAround(f, ix, iy, 64, dt, sp); continue;
     }
     if (f.role === 'builder') {
-      if (f.job && (!jobValid(f.job) || (night && f.job.built !== 0 && !(f.job.built < 1)))) f.job = null;
+      if (f.job && (!jobValid(f.job) || (night && !isClearJob(f.job) && f.job.built !== 0 && !(f.job.built < 1)))) f.job = null;
       if (!f.job) f.job = pickBuildJob(f, night);
       const j = f.job;
       if (j) {
@@ -651,7 +718,11 @@ function updateFolk(dt) {
         if (dist(f, j) > reach) moveTo(f, j.x - reach * 0.7, j.y + 6, sp, dt);
         else {
           f.working = true;
-          if (j.built != null && j.built < 1) {
+          if (isClearJob(j)) {
+            const kind = decorKind(j);
+            j.prog = Math.min(1, (j.prog || 0) + dt / (TUNE.clearTime[kind] || 4));
+            if (j.prog >= 1) { finishClear(j); f.job = null; }
+          } else if (j.built != null && j.built < 1) {
             j.built = Math.min(1, j.built + dt / TUNE.buildTime[j.type]);
             j.hp = Math.max(j.hp, Math.ceil(j.max * Math.max(0.15, j.built)));
             if (j.built >= 1) { j.hp = j.max; onBuilt(j); f.job = null; }
@@ -2215,7 +2286,8 @@ function buildDecor() {
   const addTree = (x, y) => {
     if (blocked(x, y)) return;
     occ.add(((x / cell) | 0) + ',' + ((y / cell) | 0));
-    trees.push({ x, y, v: (rnd() * 3) | 0, s: 0.84 + rnd() * 0.42, ph: rnd() * 6.28, rid: regionIdAt(x, y) });
+    const s = 0.84 + rnd() * 0.42;
+    trees.push({ kind: 'tree', x, y, v: (rnd() * 3) | 0, s, ph: rnd() * 6.28, rid: regionIdAt(x, y), r: 14 * s, marked: false, prog: 0 });
   };
   for (const r of S.regions) {
     const n = 11 + ((rnd() * 6) | 0);
@@ -2232,7 +2304,8 @@ function buildDecor() {
     if (x < 24 || y < 24 || x > W - 24 || y > H - 24) continue;
     if (S.regions.some(r => (r.x - x) ** 2 + (r.y - y) ** 2 < 64 * 64)) continue;
     if (ponds.some(p => (p.x - x) ** 2 + (p.y - y) ** 2 < (p.rx + 10) ** 2)) continue;
-    rocks.push({ x, y, v: (rnd() * 2) | 0, s: 0.75 + rnd() * 0.7, rid: regionIdAt(x, y) });
+    const s = 0.75 + rnd() * 0.7;
+    rocks.push({ kind: 'rock', x, y, v: (rnd() * 2) | 0, s, rid: regionIdAt(x, y), r: 10 * s, marked: false, prog: 0 });
     i++;
   }
   const reeds = [];
@@ -2508,11 +2581,21 @@ function drawTree(t) {
   ctx.scale(t.s, t.s);
   ctx.drawImage(spr.c, -spr.w / 2, -spr.gy, spr.w, spr.h);
   ctx.restore();
+  if (t.marked) drawClearMark(t);
 }
 function drawRock(rk) {
   const spr = Art.rock[rk.v];
   shadow(rk.x, rk.y, 8 * rk.s, 3.5 * rk.s);
   blit(spr, rk.x, rk.y, { sc: rk.s });
+  if (rk.marked) drawClearMark(rk);
+}
+function drawClearMark(o) {
+  const lift = o.kind === 'rock' ? 22 : 36;
+  const busy = S.folk.some(f => f.role === 'builder' && f.job === o && f.working);
+  if (!busy) blit(Art.orderMark, o.x - 12, o.y + 2, { sc: 1 });
+  if ((o.prog || 0) > 0) bar(o.x, o.y + 10, 36, o.prog, '#8fd06a');
+  if (!S.folk.some(f => f.role === 'builder')) placeTag('Needs a Builder', o.x, o.y + 24, 11, '#ffe6b0', '#e6c27a');
+  else if (!busy && !(o.prog > 0)) placeTag((o.kind === 'rock' ? 'Break' : 'Chop') + ' · waiting', o.x, o.y + lift, 11, '#fff6e4', null);
 }
 function gateOpen(b) {
   if (!b || b.owner === 'pale' || b.built < 1) return false;
@@ -2698,6 +2781,28 @@ function drawStand(st) {
     ctx.drawImage(Art.coin.c, st.x - (c * 9) / 2 + i * 9, st.y - 46, 9, 9);
   }
   ctx.globalAlpha = 1;
+}
+function drawClearBadge(o) {
+  if (!o || !o.marked) return;
+  const p = w2s(o.x, o.y - (o.kind === 'rock' ? 22 : 40));
+  const n = o.kind === 'rock' ? TUNE.rockCoin : TUNE.treeCoin;
+  const size = 16, pad = 7, ih = 16;
+  const txt = '+' + n;
+  ctx.font = `800 ${size}px "Segoe UI", system-ui, sans-serif`;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const tw = ctx.measureText(txt).width;
+  const w = pad + ih + 5 + tw + pad, h = 24;
+  const x = Math.round(p.x - w / 2), y = Math.round(p.y - h / 2);
+  if (y + h < TOP_CHROME - 4 || y > vh - BOT_CHROME + 4 || x + w < 4 || x > vw - 4) return;
+  rrPath(ctx, x, y, w, h, 8);
+  ctx.fillStyle = 'rgba(28,20,14,.88)';
+  ctx.fill();
+  ctx.lineWidth = 2.2;
+  ctx.strokeStyle = '#f0c14a';
+  ctx.stroke();
+  if (Art.coin) ctx.drawImage(Art.coin.c, x + pad, y + (h - ih) / 2, ih, ih);
+  ctx.fillStyle = '#fff6e4';
+  ctx.fillText(txt, x + pad + ih + 5, y + h / 2 + 0.5);
 }
 function drawStockBadge(st) {
   if (!st || st.built < 1) return;
@@ -3202,6 +3307,8 @@ function render() {
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
   for (const st of S.stands) if (st.built >= 1) drawStockBadge(st);
+  for (const t of S.trees) if (t.marked) drawClearBadge(t);
+  for (const rk of S.rocks) if (rk.marked) drawClearBadge(rk);
   drawWallCostBadge();
   for (const g of S.guardians) {
     const e = edgeOf(g.x, g.y);
@@ -3306,6 +3413,7 @@ window.__bc = {
   get lookY() { return lookY; }, set lookY(v) { lookY = v; },
   get lookFree() { return lookFree; }, set lookFree(v) { lookFree = !!v; },
   setBuild, setZoomAt, planWallLine, commitWallLine, placeBlocked, swapWallForGate, gateOpen, solidAt, tryMove,
+  decorAt, markClear, tryMarkDecor, finishClear,
   get wallDrag() { return wallDrag; },
   setWallDrag(x0, y0, x1, y1) { wallDrag = { x0, y0, x1, y1, plan: planWallLine(x0, y0, x1, y1) }; return wallDrag.plan; },
   clearWallDrag() { wallDrag = null; },
