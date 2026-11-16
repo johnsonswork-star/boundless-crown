@@ -43,7 +43,7 @@ The look is original and procedural (baked terrain plus pre-rendered canvas spri
 ## Placeholder / stubbed
 - There is no audio and no save.
 - Units: Monarch, Vagrant, Villager, Builder, Farmer, Archer. Scout, Miner, Pikeman and Knight are not in yet. Archers don't hunt animals yet (there are none).
-- New entities (vagrant, villager, builder, farmer, tool stands, farm, house, scaffold, camp) use simple placeholder art in the same procedural style until the art pass.
+- Vagrants, villagers, builders, farmers, tool stands, farms, houses, scaffolds, coins and the vagrant camp are procedural sprites in the same warm low-poly style as the rest of the map.
 - No Wood > Stone > Iron tech tiers, and the map has no fog of war or terrain.
 - "Smart" undead only means focusing one target. They don't yet claim new regions or man towers on their own beyond the flip-on-loss.
 - The map is a fixed 2400×2400 world, not infinite.

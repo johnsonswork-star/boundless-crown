@@ -8,7 +8,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>Boundless Crown — prototype</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23241910'/%3E%3Cpath fill='%23f0c14a' d='M3 12.2 4.2 6.2 8 9.1 11.8 6.2 13 12.2z'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
@@ -46,16 +46,21 @@
     <path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
   </symbol>
   <symbol id="i-house" viewBox="0 0 24 24">
-    <path fill="currentColor" d="M12 3 2.5 11.2h2.6V21h5.2v-5.6h3.4V21h5.2v-9.8h2.6L12 3z"/>
+    <path fill="currentColor" d="M3 11.2 12 3.2l9 8V21H3v-9.8zm6.2 9.2h2.4v-4.6h3.2V20.4H16V12.2L12 8.6 8.2 12.2V20.4z"/>
   </symbol>
   <symbol id="i-farm" viewBox="0 0 24 24">
-    <path fill="currentColor" d="M3 19.5 6 13h12l3 6.5H3zm4.6-7.6c-.2-2.4.9-4.4 3.4-5.4-.1 2.4-1.2 4.2-3.4 5.4zm4.8 0c2.2-.9 4.6-.4 6 1.4-2.2.9-4.4.4-6-1.4zM11.3 12V5.5h1.4V12h-1.4z"/>
+    <path fill="currentColor" d="M2.5 18.8 6.2 12h11.6l3.7 6.8H2.5zM8.2 11.2C7.6 8.4 8.8 6.2 11.4 5.2 11 8 9.6 10.2 8.2 11.2zm4.2 0c2.4-1 4.8-.4 6.4 1.2-2.6.8-4.8.2-6.4-1.2zM11.2 12V4.6h1.6V12h-1.6z"/>
   </symbol>
   <symbol id="i-hammer" viewBox="0 0 24 24">
-    <path fill="currentColor" d="M13.6 3.2 20.8 7l-1.6 3-2.8-1.5-8.9 12.3-2.6-1.9 8.8-12.1-1.7-.9 1.6-2.7z"/>
+    <path fill="currentColor" d="M14.2 3.4 21 6.8l-1.8 3.2-3.2-1.6-8.2 11.6-2.8-2 8.2-11.4-2-.9 2.2-4.3z"/>
   </symbol>
   <symbol id="i-flag" viewBox="0 0 24 24">
-    <path fill="currentColor" d="M5 2.5h2V22H5V2.5zm2.8 1.2h11.7l-3 4.4 3 4.4H7.8V3.7z"/>
+    <path fill="currentColor" d="M4.8 2.2h2.2V21.8H4.8V2.2zm2.6 1.4h12.2L16.2 8.2l3.4 4.6H7.4V3.6z"/>
+  </symbol>
+  <symbol id="i-drop" viewBox="0 0 24 24">
+    <circle cx="12" cy="9.2" r="5.6" fill="none" stroke="currentColor" stroke-width="2.3"/>
+    <path d="M12 6.4v5.6M9.6 8.2c.6-.7 4.2-.7 4.8 0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M8.2 16.2 12 21l3.8-4.8" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
   </symbol>
   <symbol id="i-skip" viewBox="0 0 24 24">
     <path fill="currentColor" d="M4 5.5 12.2 12 4 18.5V5.5zm8.2 0L20.4 12l-8.2 6.5V5.5z"/>
@@ -86,7 +91,7 @@
 </div>
 <div id="bar">
   <button id="btnBuild" data-act="build" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-hammer"/></svg><b>Build</b><i>menu</i></button>
-  <button id="btnDrop" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-coin"/></svg><b>Drop coin</b><i>hold = more</i></button>
+  <button id="btnDrop" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-drop"/></svg><b>Drop coin</b><i>hold = more</i></button>
   <button id="btnRally" data-act="rally" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-flag"/></svg><b>Rally</b><i>off</i></button>
 </div>
 <div id="over" hidden>
@@ -96,6 +101,6 @@
     <button id="btnRestart" type="button">Restart</button>
   </div>
 </div>
-<script src="game.js?v=4"></script>
+<script src="game.js?v=5"></script>
 </body>
 </html>
