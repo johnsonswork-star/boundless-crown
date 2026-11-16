@@ -16,11 +16,12 @@ const TUNE = {
   startCoins: 12, keepSlots: 1, houseSlots: 2, startHouses: 1, startBuilders: 1,
   trickleEvery: 10,              // +1 coin per owned region every N s by day (small passive)
   dropRange: 64, pickupGrace: 0.6, standMax: 3,
-  // Per-tool stock prices live on TOOL (Bow 4, Hammer 3, Scythe 4). Stands are keep fixtures, not Build-menu items.
+  standCost: { bow: 5, hammer: 3, scythe: 5 }, // Build-menu price; Hammer is cheap so you can get going
+  // Per-tool stock prices live on TOOL (Bow 4, Hammer 3, Scythe 4).
   gateCost: 6, wallSpacing: 34,
   zoomMin: 0.55, zoomMax: 2.4, zoomStart: 1,
   vagrantEvery: 18, vagrantMax: 4, vagrantStart: 2,
-  buildTime: { wall: 4, tower: 8, farm: 5, house: 6, gate: 5 }, repairRate: 14,
+  buildTime: { wall: 4, tower: 8, farm: 5, house: 6, bow: 5, hammer: 4, scythe: 5, gate: 5 }, repairRate: 14,
   farmEvery: 5, farmCoins: 1,    // a worked farm pays farmCoins every farmEvery s, by day
   coreHome: 280, coreCaptured: 150, coreRetaken: 130, coreKeep: 320,
   waveBase: 2, wavePerNight: 7, wavePerRegion: 2,
@@ -40,8 +41,12 @@ const BLD = {
   fort:  { hp: 260, r: 22, range: 220, cd: 0.8, dmg: 13 },
   farm:  { hp: 70, r: 24 },
   house: { hp: 130, r: 18 },
+  bow:    { hp: 90, r: 16 },
+  hammer: { hp: 90, r: 16 },
+  scythe: { hp: 90, r: 16 },
   gate:   { hp: 140, r: 16 },
 };
+Object.assign(COST, TUNE.standCost);
 COST.gate = TUNE.gateCost;
 
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
@@ -127,7 +132,7 @@ function newGame() {
   lookX = S.monarch.x; lookY = S.monarch.y;
   pinch = null; wallDrag = null; pts.clear(); ptr = null;
   clearToasts();
-  toast('Drop coins on vagrants and the tool stands by your keep to grow your kingdom', '');
+  toast('Start with your Builder and House. Order a Hammer stand, then drop coins on vagrants and stands', '');
 }
 function mkBld(type, x, y, rid, built) {
   const spec = BLD[type];
@@ -139,10 +144,7 @@ function mkFolk(role, x, y) {
 function setupHome() {
   const h = S.regions[0];
   for (let i = 0; i < TUNE.startHouses; i++) S.buildings.push(mkBld('house', h.x + 100 + i * 46, h.y - 24, 0, 1));
-  // Tool stands are fixed keep fixtures (Two Crowns style), not Build-menu buildings.
-  S.stands = [['bow', -72], ['hammer', 0], ['scythe', 72]].map(([tool, dx]) => (
-    { tool, x: h.x + dx, y: h.y + 110, r: 14, paid: 0, tools: 0, built: 1, owner: 'player', region: 0 }
-  ));
+  S.stands = [];
   for (let i = 0; i < TUNE.startBuilders; i++) S.folk.push(mkFolk('builder', h.x - 46 + i * 18, h.y + 50));
   // vagrant camp: just inside the nearest wild region, as far from its guardian as possible
   const wild = S.regions.filter(r => r.id !== 0).sort((a, b) => dist(a, h) - dist(b, h))[0];
@@ -385,12 +387,12 @@ function placeBld(type, x, y) {
   const rid = regionIdAt(x, y);
   S.coins -= COST[type];
   const b = mkBld(type, x, y, rid, 0);
+  if (isStandType(type)) { b.tool = type; b.paid = 0; b.tools = 0; S.stands.push(b); }
   S.buildings.push(b);
   floatTxt(x, y - 30, '-' + COST[type], '#ffb0a0');
   return b;
 }
 function tryPlace(type, x, y) {
-  if (isStandType(type)) return toast('Tool stands already stand by your keep', '');
   if (type === 'gate') {
     const hit = S.buildings.find(b => b.type === 'wall' && b.owner === 'player' && dist(b, { x, y }) < (b.r || 16) + 14);
     if (hit) return swapWallForGate(hit);
@@ -489,7 +491,7 @@ function applyClaim(t) {
       t.paid = 0; t.tools++; S.stats.tools++;
       floatTxt(t.x + 28, t.y - 70, TOOL[t.tool].label + ' ready!', '#d6ffb0');
       toast(`${TOOL[t.tool].label} bought — an idle villager will take it`, 'good');
-    } else floatTxt(t.x, t.y - 40, t.paid + ' / ' + c, '#ffd56a');
+    }
   } else {
     t.role = 'villager'; t.state = 'home'; t.tx = null; S.stats.recruits++;
     floatTxt(t.x, t.y - 34, 'Recruited!', '#d6ffb0');
@@ -2359,6 +2361,8 @@ function drawFolk(f) {
   flashAt(f.x, f.y - 8, 8, 10, f.flash);
 }
 function drawStand(st) {
+  if (!st) return;
+  if (st.built < 1) return drawScaffold(st);
   shadow(st.x, st.y + 2, 18, 5);
   blit(Art.stand[st.tool] || Art.stand.bow, st.x, st.y);
   const ic = Art.tool[st.tool];
