@@ -29,6 +29,7 @@ const TUNE = {
   guardianLeash: 220, rallyRange: 280, folkSpeed: 72,
   monarchRegen: 4, // HP/s out of combat, day only — never at night
   treeCoin: 2, rockCoin: 3, // coins dropped when a Builder finishes a marked tree / rock
+  treeCost: 1, rockCost: 2, // coins you drop on the mark to pay a Builder (net profit vs treeCoin/rockCoin)
   clearTime: { tree: 4, rock: 5 }, // seconds for a Builder to chop or break
   clearMarkRange: 170, // monarch must be this close to mark a tree or rock
 };
@@ -321,7 +322,7 @@ function setBuild(t) {
   if (!t) { $('hint').textContent = ''; lookFree = false; }
   else if (t === 'wall') $('hint').textContent = `Drag to lay a Wall · ${COST.wall} coins each · drag to a screen edge to scroll, two fingers to look around · Cancel to stop`;
   else if (t === 'gate') $('hint').textContent = `Tap to place a Gate, or tap a Wall to swap · ${COST.gate} coins · drag to look around`;
-  else if (t === 'clear') $('hint').textContent = `Tap a tree or rock near you to mark it · free · a Builder chops it · trees drop ${TUNE.treeCoin} coins, rocks ${TUNE.rockCoin} · drag to look around`;
+  else if (t === 'clear') $('hint').textContent = `Tap a tree or rock near you to mark it · drop ${TUNE.treeCost} coin for a tree, ${TUNE.rockCost} for a rock · trees drop ${TUNE.treeCoin} coins, rocks ${TUNE.rockCoin} · drag to look around`;
   else $('hint').textContent = `Tap your land to order a ${NICE[t]} · ${COST[t]} coins · drag to look around`;
 }
 function isStandType(t) { return !!TOOL[t]; }
@@ -380,8 +381,10 @@ function onTap(sx, sy) {
 }
 
 function decorKind(o) { return o && o.kind ? o.kind : (S.trees.includes(o) ? 'tree' : S.rocks.includes(o) ? 'rock' : null); }
+function clearCost(o) { return decorKind(o) === 'rock' ? TUNE.rockCost : TUNE.treeCost; }
+function clearPaid(o) { return !!o && (o.paid || 0) >= clearCost(o); }
 function isClearJob(j) {
-  if (!j || !j.marked || (j.prog || 0) >= 1) return false;
+  if (!j || !j.marked || !clearPaid(j) || (j.prog || 0) >= 1) return false;
   const k = decorKind(j);
   return k === 'tree' ? S.trees.includes(j) : k === 'rock' ? S.rocks.includes(j) : false;
 }
@@ -395,9 +398,16 @@ function decorAt(x, y, rad) {
 function markClear(obj) {
   if (!obj) return null;
   if (obj.marked) return obj;
-  obj.marked = true; obj.prog = 0;
-  const k = decorKind(obj), n = k === 'rock' ? TUNE.rockCoin : TUNE.treeCoin;
-  toast(k === 'rock' ? `Rock marked — a Builder will break it (drops ${n} coins)` : `Tree marked — a Builder will chop it (drops ${n} coins)`);
+  const k = decorKind(obj), cost = k === 'rock' ? TUNE.rockCost : TUNE.treeCost;
+  const drop = k === 'rock' ? TUNE.rockCoin : TUNE.treeCoin;
+  if (S.coins < cost) {
+    toast(cost === 1 ? 'Need 1 coin to mark this tree' : 'Need ' + cost + ' coins to mark this rock', 'bad');
+    return null;
+  }
+  obj.marked = true; obj.prog = 0; obj.paid = 0;
+  toast(k === 'rock'
+    ? `Rock marked — drop ${cost} coins to pay a Builder (drops ${drop} back)`
+    : `Tree marked — drop ${cost} coin to pay a Builder (drops ${drop} back)`);
   return obj;
 }
 function tryMarkDecor(x, y, mode) {
@@ -406,10 +416,11 @@ function tryMarkDecor(x, y, mode) {
   if (!hit) { if (mode) toast('Tap a tree or rock to mark it'); return null; }
   if (dist(hit, S.monarch) > TUNE.clearMarkRange) {
     if (mode) toast('Move closer to mark that', 'bad');
-    return mode ? null : null;
+    return null;
   }
   if (hit.marked) { if (mode) toast(decorKind(hit) === 'rock' ? 'Rock already marked' : 'Tree already marked'); return hit; }
-  return markClear(hit);
+  // Truthy even when the player cannot afford it, so the tap is consumed after the toast.
+  return markClear(hit) || true;
 }
 function dropLoot(x, y, n) {
   for (let i = 0; i < n; i++) {
@@ -558,6 +569,12 @@ function dropCoin() {
 }
 function claimTarget(d) {
   let best = null, bd = TUNE.dropRange;
+  const consider = o => {
+    if (!o.marked || clearPaid(o)) return;
+    const dd = dist(o, d); if (dd < bd) { bd = dd; best = o; }
+  };
+  for (const t of S.trees) consider(t);
+  for (const rk of S.rocks) consider(rk);
   if (S.regions[0].owner === 'player') for (const st of S.stands) if (st.owner === 'player' && st.built >= 1 && st.tools < TUNE.standMax) { const dd = dist(st, d); if (dd < bd) { bd = dd; best = st; } }
   const free = workers() < housingCap();
   d.noHouse = false;
@@ -576,6 +593,14 @@ function applyClaim(t) {
       floatTxt(t.x + 28, t.y - 70, TOOL[t.tool].label + ' ready!', '#d6ffb0');
       toast(`${TOOL[t.tool].label} bought — an idle villager will take it`, 'good');
     }
+  } else if (decorKind(t)) {
+    t.paid = (t.paid || 0) + 1;
+    const c = clearCost(t), left = Math.max(0, c - t.paid);
+    const drop = t.kind === 'rock' ? TUNE.rockCoin : TUNE.treeCoin;
+    floatTxt(t.x, t.y - 36, left ? (t.paid + ' / ' + c) : 'Paid!', left ? '#ffd56a' : '#d6ffb0');
+    if (t.paid >= c) toast(t.kind === 'rock'
+      ? `Rock paid — a Builder will break it (drops ${drop} coins)`
+      : `Tree paid — a Builder will chop it (drops ${drop} coins)`, 'good');
   } else {
     t.role = 'villager'; t.state = 'home'; t.tx = null; S.stats.recruits++;
     floatTxt(t.x, t.y - 34, 'Recruited!', '#d6ffb0');
@@ -643,8 +668,8 @@ function pickBuildJob(f, night) {
   for (const b of S.buildings) if (b.owner === 'player' && b.built < 1) {
     const d = dist(b, f) + (taken.has(b) ? 600 : 0); if (d < bd) { bd = d; best = b; }
   }
-  for (const t of S.trees) if (t.marked && (t.prog || 0) < 1) { const d = dist(t, f) + (taken.has(t) ? 600 : 0); if (d < bd) { bd = d; best = t; } }
-  for (const rk of S.rocks) if (rk.marked && (rk.prog || 0) < 1) { const d = dist(rk, f) + (taken.has(rk) ? 600 : 0); if (d < bd) { bd = d; best = rk; } }
+  for (const t of S.trees) if (isClearJob(t)) { const d = dist(t, f) + (taken.has(t) ? 600 : 0); if (d < bd) { bd = d; best = t; } }
+  for (const rk of S.rocks) if (isClearJob(rk)) { const d = dist(rk, f) + (taken.has(rk) ? 600 : 0); if (d < bd) { bd = d; best = rk; } }
   if (best || night) return best;
   for (const b of S.buildings) if (b.owner === 'player' && b.built >= 1 && b.hp < b.max - 0.5) { const d = dist(b, f) + (taken.has(b) ? 600 : 0); if (d < bd) { bd = d; best = b; } }
   for (const r of owned()) if (r.core && r.core.hp < r.core.max - 0.5) { const d = dist(r.core, f) + (taken.has(r.core) ? 600 : 0); if (d < bd) { bd = d; best = r.core; } }
@@ -2287,7 +2312,7 @@ function buildDecor() {
     if (blocked(x, y)) return;
     occ.add(((x / cell) | 0) + ',' + ((y / cell) | 0));
     const s = 0.84 + rnd() * 0.42;
-    trees.push({ kind: 'tree', x, y, v: (rnd() * 3) | 0, s, ph: rnd() * 6.28, rid: regionIdAt(x, y), r: 14 * s, marked: false, prog: 0 });
+    trees.push({ kind: 'tree', x, y, v: (rnd() * 3) | 0, s, ph: rnd() * 6.28, rid: regionIdAt(x, y), r: 14 * s, marked: false, paid: 0, prog: 0 });
   };
   for (const r of S.regions) {
     const n = 11 + ((rnd() * 6) | 0);
@@ -2305,7 +2330,7 @@ function buildDecor() {
     if (S.regions.some(r => (r.x - x) ** 2 + (r.y - y) ** 2 < 64 * 64)) continue;
     if (ponds.some(p => (p.x - x) ** 2 + (p.y - y) ** 2 < (p.rx + 10) ** 2)) continue;
     const s = 0.75 + rnd() * 0.7;
-    rocks.push({ kind: 'rock', x, y, v: (rnd() * 2) | 0, s, rid: regionIdAt(x, y), r: 10 * s, marked: false, prog: 0 });
+    rocks.push({ kind: 'rock', x, y, v: (rnd() * 2) | 0, s, rid: regionIdAt(x, y), r: 10 * s, marked: false, paid: 0, prog: 0 });
     i++;
   }
   const reeds = [];
@@ -2592,9 +2617,17 @@ function drawRock(rk) {
 function drawClearMark(o) {
   const lift = o.kind === 'rock' ? 22 : 36;
   const busy = S.folk.some(f => f.role === 'builder' && f.job === o && f.working);
+  const cost = clearCost(o), paid = o.paid || 0;
   if (!busy) blit(Art.orderMark, o.x - 12, o.y + 2, { sc: 1 });
+  // Coin glyphs on the sign, same readable payment language as a tool stand.
+  for (let i = 0; i < cost; i++) {
+    ctx.globalAlpha = i < paid ? 1 : 0.32;
+    ctx.drawImage(Art.coin.c, o.x - (cost * 10) / 2 + i * 10, o.y - lift - 2, 10, 10);
+  }
+  ctx.globalAlpha = 1;
   if ((o.prog || 0) > 0) bar(o.x, o.y + 10, 36, o.prog, '#8fd06a');
-  if (!S.folk.some(f => f.role === 'builder')) placeTag('Needs a Builder', o.x, o.y + 24, 11, '#ffe6b0', '#e6c27a');
+  if (!clearPaid(o)) placeTag('Drop ' + (cost === 1 ? '1 coin' : cost + ' coins'), o.x, o.y + lift, 11, '#ffe6b0', '#e6c27a');
+  else if (!S.folk.some(f => f.role === 'builder')) placeTag('Needs a Builder', o.x, o.y + 24, 11, '#ffe6b0', '#e6c27a');
   else if (!busy && !(o.prog > 0)) placeTag((o.kind === 'rock' ? 'Break' : 'Chop') + ' · waiting', o.x, o.y + lift, 11, '#fff6e4', null);
 }
 function gateOpen(b) {
@@ -2784,10 +2817,11 @@ function drawStand(st) {
 }
 function drawClearBadge(o) {
   if (!o || !o.marked) return;
-  const p = w2s(o.x, o.y - (o.kind === 'rock' ? 22 : 40));
+  const p = w2s(o.x, o.y - (o.kind === 'rock' ? 26 : 46));
+  const cost = clearCost(o), paid = o.paid || 0, done = paid >= cost;
   const n = o.kind === 'rock' ? TUNE.rockCoin : TUNE.treeCoin;
   const size = 16, pad = 7, ih = 16;
-  const txt = '+' + n;
+  const txt = done ? '+' + n : (paid + '/' + cost);
   ctx.font = `800 ${size}px "Segoe UI", system-ui, sans-serif`;
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   const tw = ctx.measureText(txt).width;
@@ -2798,10 +2832,10 @@ function drawClearBadge(o) {
   ctx.fillStyle = 'rgba(28,20,14,.88)';
   ctx.fill();
   ctx.lineWidth = 2.2;
-  ctx.strokeStyle = '#f0c14a';
+  ctx.strokeStyle = done ? '#8ee0b0' : '#f0c14a';
   ctx.stroke();
   if (Art.coin) ctx.drawImage(Art.coin.c, x + pad, y + (h - ih) / 2, ih, ih);
-  ctx.fillStyle = '#fff6e4';
+  ctx.fillStyle = done ? '#e9fff2' : '#fff6e4';
   ctx.fillText(txt, x + pad + ih + 5, y + h / 2 + 0.5);
 }
 function drawStockBadge(st) {
