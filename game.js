@@ -36,6 +36,13 @@ const TUNE = {
   demoTime: 4, // seconds for a Builder to tear down a marked building
   demoMarkRange: 170, // monarch must be this close to mark a building for demolish
   sendTimeout: 6, // seconds a hired-worker selection lasts with no send / re-tap
+  navCell: 16,         // walkable grid cell size in world px
+  navPad: 10,          // extra radius stamped around blocking footprints
+  navStuckTime: 1.5,   // seconds of no progress before a repath / nudge
+  navStuckDist: 6,     // movement counted as "progress" in that window
+  navRepathMax: 6,     // new A* searches allowed per update tick
+  navIterMax: 2500,    // A* node expansions cap
+  navCache: 96,        // cached start-goal paths kept between rebuilds
 };
 
 const DEBUG = new URLSearchParams(location.search).get('debug') === '1';
@@ -86,7 +93,7 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 resize();
 
-let S = null, grid = null, mapCv = document.createElement('canvas');
+let S = null, nav = null, grid = null, mapCv = document.createElement('canvas');
 mapCv.width = GW; mapCv.height = GH;
 
 function regionIdAt(x, y) {
@@ -137,6 +144,7 @@ function newGame() {
   S.monarch.x = home.x; S.monarch.y = home.y + 40;
   S.focus = null;
   setupHome();
+  markNavDirty();
   buildDecor();
   bakeGround();
   $('over').hidden = true;
@@ -653,6 +661,7 @@ function finishDemo(b) {
   }
   S.buildings.splice(S.buildings.indexOf(b), 1);
   const si = S.stands.indexOf(b); if (si >= 0) S.stands.splice(si, 1);
+  markNavDirty();
   if (coins) dropLoot(b.x, b.y, coins);
   S.fx.push({ k: 'puff', x: b.x, y: b.y, t: 0.55, t0: 0.55, big: 1 });
   floatTxt(b.x, b.y - 36, label + ' gone', '#ffd0c8');
@@ -740,6 +749,7 @@ function swapWallForGate(wall) {
   if (S.coins < fee) return toast(fee ? `Need ${fee} coins to swap in a Gate` : 'Cannot swap', 'bad');
   if (fee) { S.coins -= fee; floatTxt(wall.x, wall.y - 30, '-' + fee, '#ffb0a0'); }
   wall.type = 'gate';
+  markNavDirty();
   const ratio = wall.max ? wall.hp / wall.max : 1;
   wall.max = BLD.gate.hp; wall.r = BLD.gate.r;
   wall.hp = Math.max(1, Math.ceil(wall.max * (wall.built >= 1 ? ratio : Math.max(0.15, wall.built || 0))));
@@ -752,6 +762,7 @@ function placeBld(type, x, y) {
   const b = mkBld(type, x, y, rid, 0);
   if (isStandType(type)) { b.tool = type; b.paid = 0; b.tools = 0; S.stands.push(b); }
   S.buildings.push(b);
+  markNavDirty();
   floatTxt(x, y - 30, '-' + COST[type], '#ffb0a0');
   return b;
 }
@@ -906,22 +917,264 @@ function homeCore() {
   if (h.owner === 'player' && h.core) return h.core;
   const o = owned().find(r => r.core); return o ? o.core : null;
 }
-function moveTo(f, tx, ty, sp, dt) {
-  const d = Math.hypot(tx - f.x, ty - f.y);
-  if (d < 1.5) return true;
-  const s = Math.min(d, sp * dt);
-  const ux = (tx - f.x) / d, uy = (ty - f.y) / d;
-  if (f.role === 'vagrant') { f.x += ux * s; f.y += uy * s; return Math.hypot(tx - f.x, ty - f.y) < 6; }
-  if (!tryMove(f, f.x + ux * s, f.y + uy * s, true)) {
-    for (const ang of [0.7, -0.7, 1.15, -1.15, 1.57, -1.57]) {
-      const ca = Math.cos(ang), sa = Math.sin(ang);
-      if (tryMove(f, f.x + (ux * ca - uy * sa) * s, f.y + (ux * sa + uy * ca) * s, true)) break;
+function markNavDirty() { if (nav) nav.dirty = true; else nav = { dirty: true }; }
+function navPad() { return TUNE.navPad == null ? 10 : TUNE.navPad; }
+function navCellSize() { return TUNE.navCell || 16; }
+function rebuildNav() {
+  const cell = navCellSize(), gw = Math.ceil(W / cell), gh = Math.ceil(H / cell);
+  const friend = new Uint8Array(gw * gh), foe = new Uint8Array(gw * gh);
+  const pad = navPad();
+  function stamp(buf, x, y, rad) {
+    const r = rad + pad, r2 = r * r;
+    const x0 = Math.max(0, Math.floor((x - r) / cell)), x1 = Math.min(gw - 1, Math.floor((x + r) / cell));
+    const y0 = Math.max(0, Math.floor((y - r) / cell)), y1 = Math.min(gh - 1, Math.floor((y + r) / cell));
+    for (let gy = y0; gy <= y1; gy++) for (let gx = x0; gx <= x1; gx++) {
+      const cx = (gx + 0.5) * cell - x, cy = (gy + 0.5) * cell - y;
+      if (cx * cx + cy * cy < r2) buf[gy * gw + gx] = 1;
     }
   }
-  return Math.hypot(tx - f.x, ty - f.y) < 6;
+  if (S) {
+    for (const b of S.buildings) {
+      if (blocksFriend(b)) stamp(friend, b.x, b.y, b.r || 16);
+      if (b.owner === 'player' && b.built >= 1 && b.type !== 'farm') stamp(foe, b.x, b.y, b.r || 16);
+    }
+    for (const r of S.regions) if (r.core) {
+      stamp(friend, r.core.x, r.core.y, r.core.r || 20);
+      stamp(foe, r.core.x, r.core.y, r.core.r || 20);
+    }
+  }
+  const n = gw * gh;
+  nav = {
+    cell, gw, gh, friend, foe, dirty: false,
+    stamp: (nav && nav.stamp || 0) + 1,
+    cache: new Map(),
+    repaths: 0,
+    _g: new Float32Array(n),
+    _came: new Int32Array(n),
+    _closed: new Uint8Array(n),
+    _open: new Int32Array(n),
+    _heap: [],
+  };
+}
+function ensureNav() {
+  if (!nav || nav.dirty || !nav.friend || nav.cell !== navCellSize()) rebuildNav();
+}
+function navGrid(friend) { ensureNav(); return friend ? nav.friend : nav.foe; }
+function navIndex(x, y) {
+  const c = nav.cell, gx = Math.floor(x / c), gy = Math.floor(y / c);
+  if (gx < 0 || gy < 0 || gx >= nav.gw || gy >= nav.gh) return -1;
+  return gy * nav.gw + gx;
+}
+function navCenter(i) {
+  const c = nav.cell, gx = i % nav.gw, gy = (i / nav.gw) | 0;
+  return { x: (gx + 0.5) * c, y: (gy + 0.5) * c };
+}
+function isNavBlocked(x, y, friend) {
+  const i = navIndex(x, y);
+  return i < 0 || navGrid(friend)[i] !== 0;
+}
+function nearestWalkable(x, y, friend) {
+  ensureNav();
+  const grid = navGrid(friend), c = nav.cell, gw = nav.gw, gh = nav.gh;
+  let gx = clamp(Math.floor(x / c), 0, gw - 1), gy = clamp(Math.floor(y / c), 0, gh - 1);
+  if (grid[gy * gw + gx] === 0) return { x: (gx + 0.5) * c, y: (gy + 0.5) * c, i: gy * gw + gx };
+  const maxR = 24;
+  let best = null, bd = 1e9;
+  for (let r = 1; r <= maxR; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const x2 = gx + dx, y2 = gy + dy;
+        if (x2 < 0 || y2 < 0 || x2 >= gw || y2 >= gh) continue;
+        const i = y2 * gw + x2;
+        if (grid[i]) continue;
+        const p = navCenter(i), d = Math.hypot(p.x - x, p.y - y);
+        if (d < bd) { bd = d; best = { x: p.x, y: p.y, i }; }
+      }
+    }
+    if (best) return best;
+  }
+  return { x, y, i: -1 };
+}
+function nearestWalkableNear(x, y, minR, maxR, fromX, fromY, friend) {
+  ensureNav();
+  const grid = navGrid(friend), c = nav.cell, gw = nav.gw, gh = nav.gh;
+  const x0 = Math.max(0, Math.floor((x - maxR) / c)), x1 = Math.min(gw - 1, Math.floor((x + maxR) / c));
+  const y0 = Math.max(0, Math.floor((y - maxR) / c)), y1 = Math.min(gh - 1, Math.floor((y + maxR) / c));
+  const min2 = minR * minR, max2 = maxR * maxR;
+  let best = null, bd = 1e9;
+  for (let gy = y0; gy <= y1; gy++) for (let gx = x0; gx <= x1; gx++) {
+    const i = gy * gw + gx;
+    if (grid[i]) continue;
+    const p = navCenter(i);
+    const d2 = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
+    if (d2 < min2 || d2 > max2) continue;
+    if (solidAt(p.x, p.y, 9, friend !== false)) continue;
+    const d = Math.hypot(p.x - fromX, p.y - fromY);
+    if (d < bd) { bd = d; best = { x: p.x, y: p.y, i }; }
+  }
+  return best;
+}
+function lineWalkable(x0, y0, x1, y1, friend) {
+  const d = Math.hypot(x1 - x0, y1 - y0);
+  const steps = Math.max(2, Math.ceil(d / (nav.cell * 0.45)));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    if (isNavBlocked(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, friend)) return false;
+  }
+  return true;
+}
+function simplifyPath(pts, friend) {
+  if (!pts || pts.length < 3) return pts;
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = out[out.length - 1], c = pts[i + 1];
+    if (!lineWalkable(a.x, a.y, c.x, c.y, friend)) out.push(pts[i]);
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+function astarPath(ax, ay, bx, by, friend) {
+  ensureNav();
+  const a = nearestWalkable(ax, ay, friend), b = nearestWalkable(bx, by, friend);
+  if (a.i < 0 || b.i < 0) return null;
+  const key = (friend ? 'f' : 'e') + ':' + a.i + ':' + b.i;
+  const cached = nav.cache.get(key);
+  if (cached) return cached;
+  if (a.i === b.i) {
+    const pts = [{ x: b.x, y: b.y }];
+    nav.cache.set(key, pts);
+    return pts;
+  }
+  const gw = nav.gw, gh = nav.gh, n = gw * gh, grid = navGrid(friend);
+  const gScore = nav._g, came = nav._came, closed = nav._closed, heap = nav._heap;
+  gScore.fill(1e9); came.fill(-1); closed.fill(0); heap.length = 0;
+  const heur = (i) => {
+    const gx = i % gw, gy = (i / gw) | 0, dx = Math.abs(gx - (b.i % gw)), dy = Math.abs(gy - ((b.i / gw) | 0));
+    return (dx + dy) + (1.414 - 2) * Math.min(dx, dy);
+  };
+  gScore[a.i] = 0;
+  heap.push(a.i);
+  const less = (i, j) => (gScore[heap[i]] + heur(heap[i])) < (gScore[heap[j]] + heur(heap[j]));
+  const siftUp = (i) => { while (i > 0) { const p = (i - 1) >> 1; if (!less(i, p)) break; const t = heap[i]; heap[i] = heap[p]; heap[p] = t; i = p; } };
+  const siftDown = (i) => {
+    for (;;) {
+      let s = i, l = i * 2 + 1, r = l + 1;
+      if (l < heap.length && less(l, s)) s = l;
+      if (r < heap.length && less(r, s)) s = r;
+      if (s === i) break;
+      const t = heap[i]; heap[i] = heap[s]; heap[s] = t; i = s;
+    }
+  };
+  const ox = [1, -1, 0, 0, 1, 1, -1, -1], oy = [0, 0, 1, -1, 1, -1, 1, -1], oc = [1, 1, 1, 1, 1.414, 1.414, 1.414, 1.414];
+  const maxIter = TUNE.navIterMax || 2500;
+  let found = false, iter = 0;
+  while (heap.length && iter++ < maxIter) {
+    const i = heap[0]; heap[0] = heap[heap.length - 1]; heap.pop(); if (heap.length) siftDown(0);
+    if (closed[i]) continue;
+    closed[i] = 1;
+    if (i === b.i) { found = true; break; }
+    const gx = i % gw, gy = (i / gw) | 0;
+    for (let k = 0; k < 8; k++) {
+      const nx = gx + ox[k], ny = gy + oy[k];
+      if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue;
+      // no cutting through a blocked corner
+      if (k >= 4 && (grid[gy * gw + nx] || grid[ny * gw + gx])) continue;
+      const ni = ny * gw + nx;
+      if (grid[ni] || closed[ni]) continue;
+      const ng = gScore[i] + oc[k];
+      if (ng >= gScore[ni]) continue;
+      gScore[ni] = ng; came[ni] = i;
+      heap.push(ni); siftUp(heap.length - 1);
+    }
+  }
+  if (!found) {
+    nav.cache.set(key, null);
+    if (nav.cache.size > (TUNE.navCache || 96)) nav.cache.clear();
+    return null;
+  }
+  const rev = [];
+  for (let i = b.i; i >= 0; i = came[i]) { rev.push(navCenter(i)); if (i === a.i) break; }
+  rev.reverse();
+  // End at the exact requested walkable point
+  if (rev.length) rev[rev.length - 1] = { x: b.x, y: b.y };
+  const pts = simplifyPath(rev, friend);
+  nav.cache.set(key, pts);
+  if (nav.cache.size > (TUNE.navCache || 96)) {
+    const first = nav.cache.keys().next().value;
+    nav.cache.delete(first);
+  }
+  return pts;
+}
+function steerMove(e, nx, ny, friend) {
+  if (tryMove(e, nx, ny, friend)) return true;
+  const dx = nx - e.x, dy = ny - e.y, d = Math.hypot(dx, dy) || 1, s = d;
+  const ux = dx / d, uy = dy / d;
+  for (const ang of [0.6, -0.6, 1.05, -1.05, 1.57, -1.57, 2.1, -2.1]) {
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    if (tryMove(e, e.x + (ux * ca - uy * sa) * s, e.y + (ux * sa + uy * ca) * s, friend)) return true;
+  }
+  return false;
+}
+function followRoute(e, tx, ty, sp, dt, friend) {
+  if (!e || dt <= 0) return true;
+  const goal = nearestWalkable(tx, ty, friend !== false);
+  const fr = friend !== false;
+  const dGoal = Math.hypot(goal.x - e.x, goal.y - e.y);
+  if (dGoal < 2) return true;
+  // Close enough that a straight step will do (and still slide on corners)
+  if (dGoal < 18 || (dGoal < 40 && lineWalkable(e.x, e.y, goal.x, goal.y, fr))) {
+    const s = Math.min(dGoal, sp * dt);
+    steerMove(e, e.x + (goal.x - e.x) / dGoal * s, e.y + (goal.y - e.y) / dGoal * s, fr);
+    return Math.hypot(goal.x - e.x, goal.y - e.y) < 6;
+  }
+  ensureNav();
+  const st = e._nav || (e._nav = { path: null, pi: 0, gx: 0, gy: 0, stamp: -1, lx: e.x, ly: e.y, wait: 0 });
+  const goalChanged = Math.hypot((st.gx || 0) - goal.x, (st.gy || 0) - goal.y) > nav.cell;
+  const need = !st.path || st.pi >= (st.path.length || 0) || goalChanged || st.stamp !== nav.stamp;
+  if (need) {
+    const budget = TUNE.navRepathMax == null ? 6 : TUNE.navRepathMax;
+    if (nav.repaths < budget) {
+      nav.repaths++;
+      st.path = astarPath(e.x, e.y, goal.x, goal.y, fr);
+      st.pi = 0; st.gx = goal.x; st.gy = goal.y; st.stamp = nav.stamp;
+    }
+  }
+  const path = st.path;
+  if (path && path.length) {
+    // skip arrived waypoints; look ahead if the next is visible
+    while (st.pi < path.length - 1 && Math.hypot(path[st.pi].x - e.x, path[st.pi].y - e.y) < 14) st.pi++;
+    while (st.pi < path.length - 1 && lineWalkable(e.x, e.y, path[st.pi + 1].x, path[st.pi + 1].y, fr)) st.pi++;
+    const wp = path[Math.min(st.pi, path.length - 1)];
+    const d = Math.hypot(wp.x - e.x, wp.y - e.y) || 1;
+    const s = Math.min(d, sp * dt);
+    steerMove(e, e.x + (wp.x - e.x) / d * s, e.y + (wp.y - e.y) / d * s, fr);
+  } else {
+    const d = Math.hypot(goal.x - e.x, goal.y - e.y) || 1;
+    const s = Math.min(d, sp * dt);
+    steerMove(e, e.x + (goal.x - e.x) / d * s, e.y + (goal.y - e.y) / d * s, fr);
+  }
+  st.wait = (st.wait || 0) + dt;
+  if (st.wait >= (TUNE.navStuckTime || 1.5)) {
+    const moved = Math.hypot(e.x - st.lx, e.y - st.ly);
+    if (moved < (TUNE.navStuckDist || 6)) {
+      const w = nearestWalkable(e.x, e.y, fr);
+      const dd = Math.hypot(w.x - e.x, w.y - e.y) || 1;
+      steerMove(e, e.x + (w.x - e.x) / dd * Math.min(dd, Math.max(8, sp * dt * 4)), e.y + (w.y - e.y) / dd * Math.min(dd, Math.max(8, sp * dt * 4)), fr);
+      st.path = null;
+    }
+    st.lx = e.x; st.ly = e.y; st.wait = 0;
+  }
+  return Math.hypot(goal.x - e.x, goal.y - e.y) < 6;
+}
+function moveTo(f, tx, ty, sp, dt) {
+  return followRoute(f, tx, ty, sp, dt, true);
 }
 function workReach(j, f) {
-  return (j.r || 16) + (f.r || 9) + 8;
+  // Must reach the first walkable nav cell outside a stamped footprint (r + navPad),
+  // which can sit farther out than the old +8 margin once cells are quantized.
+  const extra = Math.max(8, (TUNE.navPad == null ? 10 : TUNE.navPad) + (TUNE.navCell || 16) * 0.75);
+  return (j.r || 16) + (f.r || 9) + extra;
 }
 function approachSpots(j, f) {
   const reach = workReach(j, f);
@@ -937,15 +1190,22 @@ function approachSpots(j, f) {
   return spots;
 }
 function pickApproach(f, j) {
+  const reach = workReach(j, f);
+  const solidR = blocksFriend(j) ? (j.r || 16) + (f.r || 9) + 1.5 : 0;
   const spots = approachSpots(j, f);
   let best = null, bd = 1e9, fallback = spots[0], fd = 1e9;
   for (const pt of spots) {
-    const d = dist(f, pt);
-    if (d < fd) { fd = d; fallback = pt; }
-    if (solidAt(pt.x, pt.y, f.r, true)) continue;
-    if (d < bd) { bd = d; best = pt; }
+    const w = nearestWalkable(pt.x, pt.y, true);
+    const cand = (w && w.i >= 0) ? w : pt;
+    const d = dist(f, cand);
+    if (d < fd) { fd = d; fallback = cand; }
+    if (solidAt(cand.x, cand.y, f.r, true)) continue;
+    if (dist(cand, j) > reach) continue;
+    if (d < bd) { bd = d; best = cand; }
   }
-  return best || fallback;
+  if (best) return best;
+  const ring = nearestWalkableNear(j.x, j.y, solidR, reach, f.x, f.y, true);
+  return ring || fallback;
 }
 function moveToJob(f, j, sp, dt) {
   if (dist(f, j) <= workReach(j, f)) return true;
@@ -981,6 +1241,7 @@ function pickBuildJob(f, night) {
   return best;
 }
 function onBuilt(b) {
+  markNavDirty();
   S.stats.built++;
   floatTxt(b.x, b.y - 40, NICE[b.type] + ' built', '#d6ffb0');
   if (b.type === 'house') toast(`House built — +${TUNE.houseSlots} worker slot${TUNE.houseSlots === 1 ? '' : 's'}`, 'good');
@@ -1225,6 +1486,7 @@ function damage(e, dmg) {
   } else if (BLD[e.type] && S.buildings.includes(e)) {
     S.buildings.splice(S.buildings.indexOf(e), 1);
     const si = S.stands.indexOf(e); if (si >= 0) S.stands.splice(si, 1);
+    markNavDirty();
     S.fx.push({ k: 'puff', x: e.x, y: e.y, t: 0.6, t0: 0.6 });
     if (e.type === 'house' && e.owner === 'player') {
       const ev = evictToCap();
@@ -1246,7 +1508,7 @@ function damage(e, dmg) {
 }
 
 function captureRegion(r) {
-  r.owner = 'player'; r.core = mkCore(r, TUNE.coreCaptured); S.mapDirty = true; S.stats.captures++;
+  r.owner = 'player'; r.core = mkCore(r, TUNE.coreCaptured); S.mapDirty = true; markNavDirty(); S.stats.captures++;
   S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05 });
   let extra = '';
   if (r.bonus === 'fort') { S.buildings.push(mkBld('fort', r.x + 60, r.y + 10, r.id, 1)); extra = ' +free Encampment Fort'; }
@@ -1256,7 +1518,7 @@ function captureRegion(r) {
   refreshCamps();
 }
 function loseRegion(r) {
-  r.owner = 'pale'; r.core = null; S.mapDirty = true; S.stats.losses++;
+  r.owner = 'pale'; r.core = null; S.mapDirty = true; markNavDirty(); S.stats.losses++;
   S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05, bad: 1 });
   S.buildings = S.buildings.filter(b => !(b.region === r.id && b.built < 1)); // unfinished scaffolds collapse
   S.stands = S.stands.filter(st => S.buildings.includes(st) || st.region !== r.id);
@@ -1270,7 +1532,7 @@ function loseRegion(r) {
   if (!owned().length) gameOver('All regions lost to the Pale Host');
 }
 function retakeRegion(r) {
-  r.owner = 'player'; r.core = mkCore(r, TUNE.coreRetaken); r.weakened = false; S.mapDirty = true; S.stats.retakes++;
+  r.owner = 'player'; r.core = mkCore(r, TUNE.coreRetaken); r.weakened = false; S.mapDirty = true; markNavDirty(); S.stats.retakes++;
   S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05 });
   let n = 0;
   for (const b of S.buildings) if (b.region === r.id && b.owner === 'pale') { b.owner = 'player'; b.hp = Math.ceil(b.max * 0.6); n++; }
@@ -1289,7 +1551,9 @@ function gameOver(why) {
 
 // ---------- update ----------
 function blocksFriend(b) {
-  if (!b || b.owner !== 'player' || b.built < 1) return false;
+  if (!b) return false;
+  if (b.type === 'core') return true;
+  if (b.owner !== 'player' || b.built < 1) return false;
   if (b.type === 'farm' || b.type === 'gate' || b.tool || isStandType(b.type)) return false;
   return true;
 }
@@ -1299,7 +1563,35 @@ function solidAt(x, y, r, friend) {
     if (!friend && (b.owner !== 'player' || b.built < 1 || b.type === 'farm')) continue;
     if (Math.hypot(b.x - x, b.y - y) < b.r + r) return b;
   }
+  if (S.regions) {
+    for (const reg of S.regions) {
+      const c = reg.core;
+      if (!c) continue;
+      if (Math.hypot(c.x - x, c.y - y) < (c.r || 20) + r) return c;
+    }
+  }
   return null;
+}
+function tickOverlapMon(dt) {
+  if (!S || !S._olMon) return;
+  if (S.phase === 'night') S._olMon.sawNight = true;
+  if (S.phase === 'day' && S._olMon.sawNight) S._olMon.sawDawn = true;
+  const acc = (u, friend, label) => {
+    if (!u || u.hp <= 0) return;
+    const hit = solidAt(u.x, u.y, u.r || 9, friend);
+    if (hit) {
+      u._ol = (u._ol || 0) + dt;
+      if (u._ol > (S._olMon.max || 0)) S._olMon.max = u._ol;
+      if (u._ol > 2 && !u._olFlag) {
+        u._olFlag = true;
+        if (S._olMon.hits.length < 8) S._olMon.hits.push({ label, t: +u._ol.toFixed(2), type: hit.type || hit.kind, x: u.x, y: u.y });
+      }
+    } else { u._ol = 0; u._olFlag = false; }
+  };
+  acc(S.monarch, true, 'monarch');
+  for (const f of S.folk) acc(f, true, f.role || 'folk');
+  for (const a of S.archers) acc(a, true, 'archer');
+  for (const u of S.undead) acc(u, false, u.kind || 'undead');
 }
 function tryMove(e, nx, ny, friend) {
   nx = clamp(nx, 10, W - 10); ny = clamp(ny, 10, H - 10);
@@ -1325,6 +1617,8 @@ function edgeScrollWall(dt) {
 }
 function update(dt) {
   if (S.over) return;
+  ensureNav();
+  nav.repaths = 0;
   followCam(dt);
   edgeScrollWall(dt);
   S.t += dt;
@@ -1348,7 +1642,7 @@ function update(dt) {
   const len = Math.hypot(dx, dy);
   if (len > 1) { dx /= len; dy /= len; }
   if (len > 0.05) { m.face = Math.atan2(dy, dx); }
-  tryMove(m, m.x + dx * m.speed * dt, m.y + dy * m.speed * dt, true);
+  if (len > 0.05) steerMove(m, m.x + dx * m.speed * dt, m.y + dy * m.speed * dt, true);
   // monarch attack
   m.cd -= dt;
   const enemies = enemiesList();
@@ -1414,7 +1708,7 @@ function update(dt) {
       }
     }
     const d = Math.hypot(tx - a.x, ty - a.y);
-    if (d > 4) { const sp = Math.min(d, spd * dt); tryMove(a, a.x + (tx - a.x) / d * sp, a.y + (ty - a.y) / d * sp, true); }
+    if (d > 4) followRoute(a, tx, ty, spd, dt, true);
     a.cd -= dt;
     if (a.cd <= 0) {
       let best = null, bd = 210;
@@ -1440,10 +1734,8 @@ function update(dt) {
     let blocked = null;
     if (t && dist(t, u) <= t.r + u.r + 4) blocked = t;
     if (!blocked && d > stopAt) {
-      const sp = u.speed * (S.chaos ? 0.75 : 1) * dt;
-      const nx = u.x + (tx - u.x) / d * sp, ny = u.y + (ty - u.y) / d * sp;
-      for (const b of playerBlds) if (Math.hypot(b.x - nx, b.y - ny) < b.r + u.r) { blocked = b; break; }
-      if (!blocked) { u.x = nx; u.y = ny; }
+      followRoute(u, tx, ty, u.speed * (S.chaos ? 0.75 : 1), dt, false);
+      for (const b of playerBlds) if (Math.hypot(b.x - u.x, b.y - u.y) < b.r + u.r) { blocked = b; break; }
     }
     u.cd -= dt;
     if (u.kind === 'necro' && !S.chaos) { u.raiseT = (u.raiseT == null ? TUNE.necroRaiseEvery : u.raiseT) - dt; if (u.raiseT <= 0) { u.raiseT = TUNE.necroRaiseEvery; raiseDead(u); } }
@@ -1461,6 +1753,7 @@ function update(dt) {
   for (const g of S.guardians) decay(g);
   for (const b of S.buildings) decay(b);
   for (const r of S.regions) if (r.core) decay(r.core);
+  tickOverlapMon(dt);
 
   for (const f of S.fx) f.t -= dt;
   S.fx = S.fx.filter(f => f.t > 0);
@@ -3853,6 +4146,8 @@ window.__bc = {
   findCampSpot, nearestCampSpot, refreshCamps, settleVagrants,
   stockBadge: false, rackedToolCount,
   get sel() { return S && S.sel; }, setSel, clearSel, sendWorker, workerAt, hiredWorkers,
+  markNavDirty, rebuildNav, ensureNav, nearestWalkable, astarPath, followRoute, steerMove, isNavBlocked,
+  get nav() { return nav; },
   teleport(x, y) { S.monarch.x = x; S.monarch.y = y; lookX = x; lookY = y; },
   coins(n) { S.coins += n; }, heal() { S.monarch.hp = S.monarch.max; },
   forceLose(id) { const r = S.regions[id]; if (r && r.core) damage(r.core, r.core.hp + 1); },

@@ -25,6 +25,7 @@ Phone-first, single-page HTML5 canvas prototype (vanilla JS, no build step, no C
 - **Trees and rocks** block building until a Builder clears them. Tap one near the monarch (or choose **Clear** in the Build menu, then tap) to mark it in one tap: **1** coin for a tree or **2** for a rock is taken from your purse immediately (`TUNE.treeCost` / `TUNE.rockCost`), a small axe/pick marker appears, and a brief −1 / −2 floats up. If you cannot afford it, a toast says **Need 1 coin** or **Need 2 coins** and nothing is marked. Tap a marked tree or rock again to cancel and refund. A Builder then chops or breaks it (progress bar). A felled tree drops **2** coins and a broken rock drops **3** (`TUNE.treeCoin` / `TUNE.rockCoin`), so you net one coin. Walk over the coins to pick them up.
 - **Demolish** (Build menu, free) marks one of your buildings with a red X sign. A Builder walks over and tears it down (`TUNE.demoTime` 4 s, progress bar), then it is removed with **no refund**. Tap the mark again or Cancel to unmark it. The Keep / home banner cannot be demolished (a toast says so). Demolishing a house evicts any workers over the new housing cap back to vagrants. Demolishing a tool stand drops its leftover stock (and any partial payment) as coins on the ground.
 - **Builders** build scaffolds, tear down demolish marks, clear marked trees and rocks, and by day they repair damaged buildings and banners.
+- **Pathfinding:** Walking units (vagrants, villagers, builders, farmers, archers, and the Pale Host) route around finished buildings and banners on a coarse grid (`TUNE.navCell` 16). If someone gets stuck they repath and step back onto walkable ground. The monarch slides around anything they bump into. Trees and rocks still only block building, not walking.
 - **Farms** pay +1 coin every 5 s by day, **only while a Farmer works them**. Passive income is now small (+1 per region every 10 s by day).
 - The monarch does **not** regenerate health at night. Out of combat during the day they recover 4 HP/s (`TUNE.monarchRegen`), and dawn restores 40 HP.
 - **Archers** do not follow by default. They guard posts (towers first, then banners, then walls), patrol around them by day and hold position at night, shooting anything in range.
@@ -36,7 +37,7 @@ Phone-first, single-page HTML5 canvas prototype (vanilla JS, no build step, no C
 - Balance check (headless sim, 4 seeds): an undefended outpost falls on night 1–2; one tower + one archer falls around night 3–5; a region with the free Fort plus a tower can hold.
 
 ## Tuning
-All knobs are in `TUNE` at the top of `game.js` (start coins, slots per house, gate cost, wall spacing, zoom min/max, costs, build times, farm rate, vagrant spawn, banner HP, wave scaling, necromancer raise rate, rally range). Per-tool stock prices are on `TOOL`.
+All knobs are in `TUNE` at the top of `game.js` (start coins, slots per house, gate cost, wall spacing, zoom min/max, costs, build times, farm rate, vagrant spawn, banner HP, wave scaling, necromancer raise rate, rally range, pathfinding grid and stuck-time). Per-tool stock prices are on `TOOL`.
 
 ## Visual style
 The look is original and procedural (baked terrain plus pre-rendered canvas sprites — nothing is loaded from a CDN or taken from another game). It aims at the same read as a minimalist low-poly kingdom game: warm pastel grass and sand, soft blue water, terracotta roofs, chunky silhouettes, and gentle shadows.
@@ -57,4 +58,4 @@ The look is original and procedural (baked terrain plus pre-rendered canvas spri
 - The map is a fixed 2400×2400 world, not infinite.
 
 ## Test hooks
-`window.__bc`: `S` (state), `teleport(x,y)`, `coins(n)`, `heal()`, `forceLose(regionId)`, `skipPhase()`, `guardianOf(id)`, `w2s`/`s2w`, `zoom`/`scale`/`setZoomAt`, `planWallLine`/`commitWallLine`/`setWallDrag`, `placeUndead`, `timeScale` (set >1 to fast-forward), `TUNE`, `dropCoin()`, `workers()`, `housingCap()`, `toggleRally()`.
+`window.__bc`: `S` (state), `teleport(x,y)`, `coins(n)`, `heal()`, `forceLose(regionId)`, `skipPhase()`, `guardianOf(id)`, `w2s`/`s2w`, `zoom`/`scale`/`setZoomAt`, `planWallLine`/`commitWallLine`/`setWallDrag`, `placeUndead`, `timeScale` (set >1 to fast-forward), `TUNE`, `dropCoin()`, `workers()`, `housingCap()`, `toggleRally()`, `markNavDirty()`, `nearestWalkable()`, `astarPath()`, `nav`.
