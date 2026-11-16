@@ -27,6 +27,7 @@ const TUNE = {
   waveBase: 2, wavePerNight: 7, wavePerRegion: 2,
   necroRaiseEvery: 5, leaderDmg: 1.25,
   guardianLeash: 220, rallyRange: 280, folkSpeed: 72,
+  monarchRegen: 4, // HP/s out of combat, day only — never at night
 };
 const DEBUG = new URLSearchParams(location.search).get('debug') === '1';
 const NAMES = ['Crownhold', 'Ashford', 'Briarmoor', 'Coldwater', 'Duskfen', 'Elmreach', 'Frostgate', 'Gloamwood'];
@@ -52,7 +53,7 @@ COST.gate = TUNE.gateCost;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const $ = id => document.getElementById(id);
 let dpr = 1, vw = 0, vh = 0, baseScale = 1, zoom = TUNE.zoomStart, scale = 1;
-let lookX = null, lookY = null, pinch = null;
+let lookX = null, lookY = null, lookFree = false, pinch = null;
 const pts = new Map();
 function applyScale() {
   const zMin = TUNE.zoomMin, zMax = TUNE.zoomMax;
@@ -71,6 +72,7 @@ function resize() {
 addEventListener('resize', resize);
 
 function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function rand() { return (S && S.seeded && S.playRng) ? S.playRng() : Math.random(); }
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 resize();
@@ -86,7 +88,9 @@ function regionIdAt(x, y) {
 
 function newGame() {
   const q = new URLSearchParams(location.search);
-  const seed = (+q.get('seed')) || ((Math.random() * 1e9) | 0);
+  const seedQ = q.get('seed');
+  const seeded = seedQ != null && seedQ !== '';
+  const seed = seeded ? ((+seedQ) || 0) : ((Math.random() * 1e9) | 0);
   const rnd = mulberry(seed);
   S = {
     seed, t: 0, phase: 'day', phaseT: DAY, day: 1, nights: 0, coins: TUNE.startCoins, trickle: 0,
@@ -97,8 +101,10 @@ function newGame() {
     stats: { towerShots: 0, paleTowerShots: 0, spawned: 0, captures: 0, losses: 0, retakes: 0,
       dropped: 0, recruits: 0, tools: 0, roles: 0, built: 0, farmCoins: 0, raised: 0, folkLost: 0 },
     monarch: { x: 0, y: 0, r: 16, hp: 120, max: 120, cd: 0, target: null, speed: 190, vx: 0, vy: 0, face: 0 },
-    nightK: 0,
+    nightK: 0, waveSide: null,
   };
+  S.seeded = seeded;
+  S.playRng = seeded ? mulberry((seed ^ 0xa5a5a5a5) >>> 0) : null;
   const N = 7;
   S.regions.push(mkRegion(0, CX + (rnd() - .5) * 80, CY + (rnd() - .5) * 80));
   const a0 = rnd() * Math.PI * 2;
@@ -129,7 +135,7 @@ function newGame() {
   setBuild(null); showMenu(false);
   $('btnRally').classList.remove('sel');
   zoom = TUNE.zoomStart; applyScale();
-  lookX = S.monarch.x; lookY = S.monarch.y;
+  lookX = S.monarch.x; lookY = S.monarch.y; lookFree = false;
   pinch = null; wallDrag = null; pts.clear(); ptr = null;
   clearToasts();
   toast('Start with your Builder and House. Order a Hammer stand, then drop coins on vagrants and stands', '');
@@ -194,10 +200,11 @@ function startPinch() {
   const arr = [...pts.values()];
   if (arr.length < 2) return;
   const d = Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y) || 1;
-  pinch = { d0: d, z0: zoom };
+  const mx = (arr[0].x + arr[1].x) / 2, my = (arr[0].y + arr[1].y) / 2;
+  pinch = { d0: d, z0: zoom, mx, my };
   pinched = true;
   ptr = null;
-  wallDrag = null; // pinch wins; do not place the wall line
+  wallDrag = null; // pinch/two-finger pan wins; do not place the wall line
 }
 function onWheelZoom(e) {
   e.preventDefault();
@@ -212,7 +219,7 @@ cv.addEventListener('pointerdown', e => {
   try { cv.setPointerCapture(e.pointerId); } catch (_) {}
   if (pts.size >= 2) { startPinch(); return; }
   if (pinch || pinched) return;
-  ptr = { id: e.pointerId, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, drag: false, t: performance.now(), build: !!(S && S.build) };
+  ptr = { id: e.pointerId, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, px: e.clientX, py: e.clientY, drag: false, pan: false, t: performance.now(), build: !!(S && S.build) };
   if (S && !S.over && S.build === 'wall') {
     const w = s2w(e.clientX, e.clientY);
     wallDrag = { x0: w.x, y0: w.y, x1: w.x, y1: w.y };
@@ -225,15 +232,26 @@ cv.addEventListener('pointermove', e => {
     const arr = [...pts.values()];
     const d = Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y) || 1;
     const mx = (arr[0].x + arr[1].x) / 2, my = (arr[0].y + arr[1].y) / 2;
+    lookX -= (mx - pinch.mx) / scale;
+    lookY -= (my - pinch.my) / scale;
+    pinch.mx = mx; pinch.my = my;
+    if (S && S.build) lookFree = true;
     setZoomAt(pinch.z0 * (d / pinch.d0), mx, my);
     return;
   }
   if (!ptr || e.pointerId !== ptr.id) return;
+  const lx = ptr.x, ly = ptr.y;
   ptr.x = e.clientX; ptr.y = e.clientY;
   if (Math.hypot(ptr.x - ptr.sx, ptr.y - ptr.sy) > 14) ptr.drag = true;
   if (wallDrag && ptr.wall) {
     const w = s2w(ptr.x, ptr.y);
     wallDrag.x1 = w.x; wallDrag.y1 = w.y;
+  } else if (S && S.build && S.build !== 'wall' && ptr.drag && !pinch) {
+    // Tap-to-place: a drag pans the map so you can reach land off-screen. A short tap still places.
+    ptr.pan = true;
+    lookX -= (ptr.x - lx) / scale;
+    lookY -= (ptr.y - ly) / scale;
+    lookFree = true;
   }
 });
 const endPtr = e => {
@@ -247,7 +265,7 @@ const endPtr = e => {
   if (pts.size === 0) pinched = false;
   if (!ptr || e.pointerId !== ptr.id) return;
   if (wallDrag && ptr.wall && e.type === 'pointerup') commitWallLine(planWallLine(wallDrag.x0, wallDrag.y0, wallDrag.x1, wallDrag.y1));
-  else if (!ptr.drag && !ptr.wall && performance.now() - ptr.t < 600 && e.type === 'pointerup') onTap(ptr.x, ptr.y);
+  else if (!ptr.drag && !ptr.wall && !ptr.pan && performance.now() - ptr.t < 600 && e.type === 'pointerup') onTap(ptr.x, ptr.y);
   wallDrag = null;
   ptr = null;
 };
@@ -297,10 +315,10 @@ function setBuild(t) {
   bb.classList.toggle('sel', !!t);
   bb.querySelector('b').textContent = t ? 'Cancel' : 'Build';
   bb.querySelector('i').textContent = t ? NICE[t] : 'menu';
-  if (!t) $('hint').textContent = '';
-  else if (t === 'wall') $('hint').textContent = `Drag to lay a Wall · ${COST.wall} coins each · Cancel to stop`;
-  else if (t === 'gate') $('hint').textContent = `Tap to place a Gate, or tap a Wall to swap · ${COST.gate} coins`;
-  else $('hint').textContent = `Tap your land to order a ${NICE[t]} · ${COST[t]} coins`;
+  if (!t) { $('hint').textContent = ''; lookFree = false; }
+  else if (t === 'wall') $('hint').textContent = `Drag to lay a Wall · ${COST.wall} coins each · drag to a screen edge to scroll, two fingers to look around · Cancel to stop`;
+  else if (t === 'gate') $('hint').textContent = `Tap to place a Gate, or tap a Wall to swap · ${COST.gate} coins · drag to look around`;
+  else $('hint').textContent = `Tap your land to order a ${NICE[t]} · ${COST[t]} coins · drag to look around`;
 }
 function isStandType(t) { return !!TOOL[t]; }
 function setZoomAt(z, sx, sy) {
@@ -312,6 +330,10 @@ function setZoomAt(z, sx, sy) {
 }
 function followCam(dt) {
   if (!S || pinch) return;
+  if (ptr && ptr.pan) return;
+  // In build mode, a pan or two-finger look stays put so you can place off-screen. Leaving build follows the monarch again.
+  if (lookFree && S.build) return;
+  lookFree = false;
   const m = S.monarch;
   if (lookX == null) { lookX = m.x; lookY = m.y; return; }
   const k = Math.min(1, 6 * dt);
@@ -530,10 +552,15 @@ function moveTo(f, tx, ty, sp, dt) {
   const d = Math.hypot(tx - f.x, ty - f.y);
   if (d < 1.5) return true;
   const s = Math.min(d, sp * dt);
-  const nx = f.x + (tx - f.x) / d * s, ny = f.y + (ty - f.y) / d * s;
-  if (f.role === 'vagrant') { f.x = nx; f.y = ny; }
-  else tryMove(f, nx, ny, true);
-  return d < 6;
+  const ux = (tx - f.x) / d, uy = (ty - f.y) / d;
+  if (f.role === 'vagrant') { f.x += ux * s; f.y += uy * s; return Math.hypot(tx - f.x, ty - f.y) < 6; }
+  if (!tryMove(f, f.x + ux * s, f.y + uy * s, true)) {
+    for (const ang of [0.7, -0.7, 1.15, -1.15, 1.57, -1.57]) {
+      const ca = Math.cos(ang), sa = Math.sin(ang);
+      if (tryMove(f, f.x + (ux * ca - uy * sa) * s, f.y + (ux * sa + uy * ca) * s, true)) break;
+    }
+  }
+  return Math.hypot(tx - f.x, ty - f.y) < 6;
 }
 function wanderAround(f, cx, cy, rad, dt, sp) {
   f.wt -= dt;
@@ -585,12 +612,33 @@ function updateFolk(dt) {
     if (!hc) continue;
     const ix = hc.x, iy = hc.y + 58;
     if (f.role === 'villager') {
-      let st = f.stand && f.stand.tools > 0 ? f.stand : null;
+      let st = f.stand && f.stand.built >= 1 && f.stand.tools > 0 ? f.stand : null;
       if (!st) {
         f.stand = null;
-        for (const s of S.stands) if (s.tools > S.folk.filter(o => o.stand === s).length) { st = s; f.stand = s; break; }
+        for (const s of S.stands) {
+          if (s.owner !== 'player' || s.built < 1) continue;
+          if (s.tools > S.folk.filter(o => o.stand === s).length) { st = s; f.stand = s; break; }
+        }
       }
-      if (st) { if (moveTo(f, st.x, st.y + (st.r || 14) + 6, sp, dt)) { st.tools--; f.stand = null; becomeRole(f, TOOL[st.tool].role); } continue; }
+      if (st && TOOL[st.tool]) {
+        const reach = (st.r || 16) + f.r + 10;
+        if (dist(f, st) <= reach) { st.tools--; f.stand = null; becomeRole(f, TOOL[st.tool].role); continue; }
+        const spots = [
+          { x: st.x, y: st.y + (st.r || 16) + 8 },
+          { x: st.x - (st.r || 16) - 8, y: st.y + 6 },
+          { x: st.x + (st.r || 16) + 8, y: st.y + 6 },
+          { x: st.x, y: st.y - (st.r || 16) - 8 },
+        ];
+        let best = spots[0], bd = 1e9;
+        for (const pt of spots) {
+          if (solidAt(pt.x, pt.y, f.r, true)) continue;
+          const d = dist(f, pt);
+          if (d < bd) { bd = d; best = pt; }
+        }
+        moveTo(f, best.x, best.y, sp, dt);
+        if (dist(f, st) <= reach) { st.tools--; f.stand = null; becomeRole(f, TOOL[st.tool].role); }
+        continue;
+      }
       if (f.state === 'home') { if (Math.hypot(f.x - ix, f.y - iy) > 50) { moveTo(f, ix, iy, sp, dt); continue; } f.state = 'idle'; }
       wanderAround(f, ix, iy, 64, dt, sp); continue;
     }
@@ -668,13 +716,27 @@ function startNight() {
   for (let i = 0; i < n; i++) q.push(Math.random() < 0.5 ? 'shambler' : 'skeleton');
   q.splice(Math.min(2, q.length), 0, 'necro');
   S.spawnQ = q; S.spawnGap = Math.min(1.0, 16 / q.length); S.spawnT = 0.5;
-  // smart wave: the necromancer picks the weakest, most exposed banner, and marches from the nearest Pale/wild land
   pickFocus();
-  const fr = S.focus != null ? S.regions[S.focus] : S.regions[0];
-  const srcs = S.regions.filter(r => r.owner !== 'player').sort((a, b) => dist(a, fr) - dist(b, fr));
-  const edges = [{ x: 40, y: Math.random() * H }, { x: W - 40, y: Math.random() * H }, { x: Math.random() * W, y: 40 }, { x: Math.random() * W, y: H - 40 }];
-  S.waveSrc = srcs.length ? { x: srcs[0].x, y: srcs[0].y } : edges[(Math.random() * 4) | 0];
+  pickWaveSide();
+  S.waveSrc = waveEntryPoint(S.waveSide);
   toast(`Night ${S.nights + 1} — the Pale Host marches!`, 'bad');
+}
+function pickWaveSide() {
+  const r = rand();
+  S.waveSide = r < 1 / 3 ? 'left' : r < 2 / 3 ? 'right' : 'both';
+  return S.waveSide;
+}
+function waveEntryPoint(side) {
+  // Side is fully random each wave (left / right / both). Entry is a flank of the
+  // objective, close enough for the host to arrive in one night — not a far map edge.
+  const fr = (S.focus != null && S.regions[S.focus]) || S.regions[0];
+  const use = side === 'both' ? (rand() < 0.5 ? 'left' : 'right') : (side || 'left');
+  const sign = use === 'left' ? -1 : 1;
+  const pool = S.regions.filter(r => r.owner !== 'player' && (use === 'left' ? r.x < fr.x : r.x >= fr.x))
+    .sort((a, b) => dist(a, fr) - dist(b, fr));
+  if (pool.length && dist(pool[0], fr) < 900) return { x: pool[0].x, y: pool[0].y, side: use };
+  const off = 360 + rand() * 80;
+  return { x: clamp(fr.x + sign * off, 40, W - 40), y: clamp(fr.y + (rand() - 0.5) * 200, 40, H - 40), side: use };
 }
 function pickFocus() {
   const o = owned().filter(r => r.core); if (!o.length) { S.focus = null; return; }
@@ -698,13 +760,11 @@ function raiseDead(n) {
   S.fx.push({ k: 'puff', x: u.x, y: u.y, t: 0.5, t0: 0.5 });
 }
 function spawnUndead(kind) {
-  const src = Math.random() < 0.75 && S.waveSrc ? S.waveSrc : (() => {
-    const c = S.regions.filter(r => r.owner !== 'player'); const r = c.length ? c[(Math.random() * c.length) | 0] : { x: 40, y: 40 }; return r;
-  })();
+  const src = waveEntryPoint(S.waveSide || pickWaveSide());
   const s = UNDEAD[kind];
-  const u = { type: 'undead', kind, x: clamp(src.x + (Math.random() - .5) * 120, 10, W - 10), y: clamp(src.y + (Math.random() - .5) * 120, 10, H - 10),
-    r: s.r, hp: s.hp, max: s.hp, speed: s.speed * (0.9 + Math.random() * 0.2), dmg: s.dmg, cd: 0, tgt: null, rt: 0, jit: (Math.random() - .5) };
-  S.undead.push(u); S.stats.spawned++;
+  const u = { type: 'undead', kind, x: clamp(src.x + (rand() - .5) * 120, 10, W - 10), y: clamp(src.y + (rand() - .5) * 120, 10, H - 10),
+    r: s.r, hp: s.hp, max: s.hp, speed: s.speed * (0.9 + rand() * 0.2), dmg: s.dmg, cd: 0, tgt: null, rt: 0, jit: (rand() - .5) };
+S.undead.push(u); S.stats.spawned++;
   if (kind === 'necro') { S.leader = u; toast('A Necromancer leads this wave!', 'bad'); }
 }
 
@@ -817,9 +877,25 @@ function tryMove(e, nx, ny, friend) {
   if (!solidAt(e.x, ny, e.r, friend)) { e.y = ny; return true; }
   return false;
 }
+function edgeScrollWall(dt) {
+  if (!wallDrag || !ptr || !ptr.wall || pinch) return;
+  const margin = 52, speed = 260;
+  let sx = 0, sy = 0;
+  if (ptr.x < margin) sx = -1;
+  else if (ptr.x > vw - margin) sx = 1;
+  if (ptr.y < TOP_CHROME + 8) sy = -1;
+  else if (ptr.y > vh - BOT_CHROME + 8) sy = 1;
+  if (!sx && !sy) return;
+  lookX += sx * speed * dt;
+  lookY += sy * speed * dt;
+  lookFree = true;
+  const w = s2w(ptr.x, ptr.y);
+  wallDrag.x1 = w.x; wallDrag.y1 = w.y;
+}
 function update(dt) {
   if (S.over) return;
   followCam(dt);
+  edgeScrollWall(dt);
   S.t += dt; S.phaseT -= dt;
   if (S.phaseT <= 0) { if (S.phase === 'day') startNight(); else startDay(); }
   if (S.phase === 'day') { S.trickle += dt; if (S.trickle >= TUNE.trickleEvery) { S.trickle -= TUNE.trickleEvery; S.coins += owned().length; } }
@@ -846,7 +922,7 @@ function update(dt) {
     if (tgt) { m.cd = 0.45; S.fx.push({ k: 'slash', x: m.x, y: m.y, tx: tgt.x, ty: tgt.y, t: 0.18, t0: 0.18 }); damage(tgt, 22); if (S.over) return; }
   }
   for (const e of enemies) if (dist(e, m) < 260) { near = true; break; }
-  if (!near) m.hp = Math.min(m.max, m.hp + 4 * dt);
+  if (!near && S.phase === 'day') m.hp = Math.min(m.max, m.hp + TUNE.monarchRegen * dt);
 
   // guardians
   for (const g of S.guardians) {
@@ -3226,7 +3302,10 @@ window.__bc = {
   get S() { return S; }, get fps() { return fps; }, w2s, s2w, regionIdAt, skipPhase, newGame,
   get zoom() { return zoom; }, set zoom(z) { zoom = z; applyScale(); },
   get scale() { return scale; },
-  setZoomAt, planWallLine, commitWallLine, placeBlocked, swapWallForGate, gateOpen, solidAt, tryMove,
+  get lookX() { return lookX; }, set lookX(v) { lookX = v; },
+  get lookY() { return lookY; }, set lookY(v) { lookY = v; },
+  get lookFree() { return lookFree; }, set lookFree(v) { lookFree = !!v; },
+  setBuild, setZoomAt, planWallLine, commitWallLine, placeBlocked, swapWallForGate, gateOpen, solidAt, tryMove,
   get wallDrag() { return wallDrag; },
   setWallDrag(x0, y0, x1, y1) { wallDrag = { x0, y0, x1, y1, plan: planWallLine(x0, y0, x1, y1) }; return wallDrag.plan; },
   clearWallDrag() { wallDrag = null; },
@@ -3250,6 +3329,7 @@ window.__bc = {
     return u;
   },
   timeScale: 1, TUNE, dropCoin, workers, housingCap, toggleRally, debug: DEBUG,
+  rand, pickWaveSide, waveEntryPoint, startNight,
 };
 
 buildArt();
