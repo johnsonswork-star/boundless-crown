@@ -1,0 +1,1291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#241910">
+<title>Boundless Crown — Building upgrades (preview)</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23241910'/%3E%3Cpath fill='%23f0c14a' d='M3 12.2 4.2 6.2 8 9.1 11.8 6.2 13 12.2z'/%3E%3C/svg%3E">
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:#1a1612;color:#fff6e4;
+  font-family:"Avenir Next","Segoe UI","Trebuchet MS","Gill Sans",sans-serif;
+  -webkit-text-size-adjust:100%}
+body{padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.page{width:100%;max-width:390px;margin:0 auto;padding:14px 12px 36px}
+h1{margin:0 0 6px;font-size:22px;line-height:1.2;letter-spacing:.01em}
+.sub{margin:0 0 14px;font-size:15px;line-height:1.4;font-weight:700;color:#f3e6cf}
+.preview-banner{background:linear-gradient(#5a4326,#3a2a18);border:3px solid #e6c27a;border-radius:16px;
+  padding:10px 12px;margin:0 0 14px;font-size:16px;font-weight:800;line-height:1.35;text-align:center;
+  box-shadow:0 2px 0 #120e0a,0 8px 18px rgba(0,0,0,.28)}
+.preview-banner b{color:#ffd56a}
+.rules{background:linear-gradient(#3a2c22,#241910);border:3px solid #e6c27a;border-radius:16px;
+  padding:12px 12px 10px;margin:0 0 18px;box-shadow:0 2px 0 #120e0a}
+.rules h2{margin:0 0 8px;font-size:17px}
+.rules ul{margin:0;padding:0 0 0 18px}
+.rules li{margin:0 0 7px;font-size:15px;font-weight:700;line-height:1.35;color:#f3e6cf}
+.rules li strong{color:#fff6e4;font-weight:800}
+.gold{color:#ffd56a}
+h2.sec{margin:20px 0 8px;font-size:18px;line-height:1.25}
+.lead{margin:0 0 10px;font-size:15px;font-weight:700;line-height:1.4;color:#f3e6cf}
+.row{background:linear-gradient(#3a2c22,#241910);border:3px solid #8c7352;border-radius:18px;
+  padding:10px 8px 8px;margin:0 0 12px;box-shadow:0 6px 16px rgba(0,0,0,.28)}
+.row h3{margin:0 8px 8px;font-size:17px;display:flex;align-items:center;gap:8px}
+.row h3 .tag{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+  color:#2a1c10;background:#e6c27a;border-radius:999px;padding:2px 8px}
+.levels{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+.lvl{background:#2a2118;border:2px solid #8c7352;border-radius:14px;padding:6px 4px 8px;text-align:center;min-width:0}
+.lvl canvas{display:block;width:100%;height:118px;margin:0 auto 4px;border-radius:10px;background:#6a8f4a}
+.lvl .mat{display:inline-block;font-size:11px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 7px;border-radius:999px;margin:0 0 4px;color:#2a1c10}
+.lvl .mat.wood{background:#d2a56c}
+.lvl .mat.stone{background:#e7e2d8}
+.lvl .mat.iron{background:#b8bcc4}
+.lvl .cost{font-size:15px;font-weight:900;color:#ffd56a;margin:0 0 3px;letter-spacing:.01em}
+.lvl .fx{font-size:13px;font-weight:800;line-height:1.3;color:#fff6e4;margin:0 0 3px}
+.lvl .req{font-size:12px;font-weight:800;line-height:1.3;color:#e6c27a}
+.lvl.start .cost{color:#8ee0b0}
+.tower-tree{display:flex;flex-direction:column;align-items:center;gap:0}
+.tower-tree .trunk{width:min(100%,160px);margin:0 auto 0}
+.fork{position:relative;width:100%;height:28px;margin:2px 0 4px}
+.fork svg{display:block;width:100%;height:28px}
+.tower-tree .branches{display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%}
+.tower-tree .path{display:flex;flex-direction:column;gap:6px;min-width:0}
+.tower-tree .path .lvl canvas{height:132px}
+.path-label{text-align:center;font-size:13px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;
+  color:#ffd56a;margin:0 0 2px}
+.mines{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mines .lvl canvas{height:140px}
+#village-card{padding:10px 0 8px}
+#village-wrap{margin:0 8px 8px;border-radius:14px;overflow:hidden;border:2px solid #8c7352;background:#6a8f4a}
+#village{display:block;width:100%;height:280px}
+.caption{margin:0 10px 4px;font-size:13px;font-weight:800;line-height:1.35;color:#f3e6cf}
+a.back{display:inline-block;margin-top:16px;color:#ffd56a;font-weight:800;font-size:16px}
+</style>
+</head>
+<body>
+<main class="page">
+  <h1>Building upgrades</h1>
+  <p class="sub">A look at every level, before any of this is wired into the game.</p>
+  <div class="preview-banner">Preview only — the live game is still <b>update 18</b>. Nothing here has been added to play yet.</div>
+
+  <section class="rules">
+    <h2>How upgrades work</h2>
+    <ul>
+      <li>Walk up and drop coins in the slot. A builder comes over and works on it, Kingdom-style.</li>
+      <li>Every building has three levels — <strong>wood</strong>, then <strong>stone</strong>, then <strong>iron</strong> — except tool stands, which do not upgrade.</li>
+      <li>Upgrades are expensive: <strong class="gold">6</strong>, <strong class="gold">12</strong> and <strong class="gold">20</strong> coins.</li>
+      <li>The <strong>keep’s level</strong> caps every other building. Nothing can go above the keep.</li>
+      <li>Stone and iron come from <strong>mines</strong> you have to capture. Lose that land and you cannot start new upgrades of that material. Buildings you already upgraded stay as they are.</li>
+    </ul>
+  </section>
+
+  <h2 class="sec" id="catalog">Every building, every level</h2>
+  <p class="lead">Each row shows wood, stone and iron side by side, with the cost, what you get, and which mine you need.</p>
+  <div id="catalog-rows"></div>
+
+  <h2 class="sec" id="towers">Tower paths</h2>
+  <p class="lead">A wood tower starts with one archer. At stone you pick a path — cannon or ballista — and iron makes that path stronger.</p>
+  <div id="tower-tree" class="row"></div>
+
+  <h2 class="sec" id="mines">Mines</h2>
+  <p class="lead">Each map hides a stone mine and an iron mine on land outside your starting ground. Capture the land to unlock that material.</p>
+  <div id="mine-rows" class="row"></div>
+
+  <h2 class="sec" id="village-sec">A village on the frontier</h2>
+  <p class="lead">A mixed village: an iron keep, upgraded houses and walls, both tower paths, and the two mines still out on wild land you would need to take.</p>
+  <div class="row" id="village-card">
+    <div id="village-wrap"><canvas id="village" width="366" height="280"></canvas></div>
+    <p class="caption">Your land is the warm gold ground in the middle. The grey-green edges are still wild. Mines sit out there until you expand.</p>
+  </div>
+
+  <p class="sub" style="margin-top:16px">Tool stands are left out on purpose — they do not get upgrades. Farms, gates and captured forts are shown as proposals, since they already exist in the game.</p>
+  <a class="back" href="../?v=18">Back to the live game</a>
+</main>
+<script>
+'use strict';
+const SPR = 3;
+function bake(w, h, fn) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.ceil(w * SPR));
+  c.height = Math.max(1, Math.ceil(h * SPR));
+  const g = c.getContext('2d');
+  g.scale(SPR, SPR);
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  fn(g);
+  return { c, w, h, gy: h - 2 };
+}
+function ell(g, x, y, rx, ry, color, rot) {
+  g.fillStyle = color;
+  g.beginPath();
+  g.ellipse(x, y, Math.max(0.2, rx), Math.max(0.2, ry), rot || 0, 0, Math.PI * 2);
+  g.fill();
+}
+function disc(g, x, y, r, color) { ell(g, x, y, r, r, color, 0); }
+function poly(g, pts, color) {
+  g.beginPath();
+  g.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+  g.closePath();
+  g.fillStyle = color;
+  g.fill();
+}
+function paintShadow() {
+  return bake(48, 22, g => {
+    const grd = g.createRadialGradient(24, 11, 1, 24, 11, 16);
+    grd.addColorStop(0, 'rgba(62,42,18,.42)');
+    grd.addColorStop(1, 'rgba(62,42,18,0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 48, 22);
+  });
+}
+function paintCoin() {
+  return bake(16, 16, g => {
+    disc(g, 8, 8.4, 6.2, '#a56b12');
+    disc(g, 8, 7.6, 5.6, '#f0c14a');
+    disc(g, 6.2, 6, 2.1, 'rgba(255,248,220,.75)');
+    g.strokeStyle = '#8a5a14';
+    g.lineWidth = 1.3;
+    g.beginPath(); g.moveTo(8, 5.2); g.lineTo(8, 10.4); g.stroke();
+  });
+}
+function paintTree(kind) {
+  const tall = kind === 2;
+  const w = tall ? 34 : 46, h = tall ? 62 : 52;
+  const spr = bake(w, h, g => {
+    const cx = w / 2, base = h - 2;
+    g.fillStyle = '#4a2f20';
+    g.fillRect(cx - 1, base - 18, 4, 18);
+    g.fillStyle = '#6b4630';
+    g.fillRect(cx - 2.4, base - 18, 3.2, 18);
+    if (tall) {
+      ell(g, cx, base - 30, 8, 16, '#3f6a30');
+      ell(g, cx - 1, base - 36, 7, 13, '#5c8a3c');
+      ell(g, cx - 2, base - 44, 5, 8, '#8fb85a');
+    } else {
+      const r = kind === 1 ? 15 : 13;
+      ell(g, cx + 6, base - 22, r * 0.85, r * 0.72, '#3f6a30');
+      ell(g, cx - 5, base - 24, r, r * 0.86, '#5d8f3e');
+      ell(g, cx - 1, base - 32, r * 0.78, r * 0.7, '#7eac52');
+      ell(g, cx - 6, base - 34, 5, 4, 'rgba(236,244,200,.55)');
+    }
+  });
+  spr.gy = h - 2;
+  return spr;
+}
+function paintRock(v) {
+  const spr = bake(v ? 26 : 20, 14, g => {
+    const w = v ? 26 : 20;
+    poly(g, [[2, 12], [4, 5], [w * 0.55, 2], [w - 2, 6], [w - 1, 12]], '#8e8578');
+    poly(g, [[3, 11], [6, 6], [w * 0.5, 4], [w * 0.46, 11]], '#d4cbbd');
+  });
+  spr.gy = 12;
+  return spr;
+}
+function paintArcher(frame) {
+  const spr = bake(30, 34, g => {
+    const step = frame > 0 ? (frame === 2 ? -1.4 : 2.2) : 0;
+    g.fillStyle = '#5c4030';
+    g.fillRect(10, 24, 3, 8);
+    g.fillRect(16, 24 - step, 3, 8 + step);
+    g.fillStyle = '#3a2a1c';
+    g.fillRect(10, 31, 3.2, 1.6);
+    g.fillRect(16, 31, 3.2, 1.6);
+    ell(g, 14, 20, 6, 6.5, '#6e9a4a');
+    ell(g, 16.5, 21, 3, 5, '#4f7a34');
+    g.fillStyle = '#3e74c8';
+    g.fillRect(11, 18, 7, 2.2);
+    g.fillStyle = '#8b5a32';
+    g.fillRect(8, 15, 2.4, 7);
+    g.strokeStyle = '#f0c14a';
+    g.lineWidth = 0.8;
+    g.beginPath(); g.moveTo(8.6, 15); g.lineTo(7.2, 10); g.moveTo(10, 15); g.lineTo(10.6, 10); g.stroke();
+    disc(g, 14, 11, 3.5, '#e6b898');
+    g.fillStyle = '#5c4030';
+    g.beginPath();
+    g.arc(14, 11, 3.8, Math.PI * 1.05, Math.PI * 1.95);
+    g.quadraticCurveTo(18.5, 6, 14, 4.2);
+    g.quadraticCurveTo(9.5, 6, 10, 11);
+    g.fill();
+    g.strokeStyle = '#6b4630';
+    g.lineWidth = 1.4;
+    g.beginPath(); g.arc(22, 18, 7.2, -1.25, 1.25); g.stroke();
+    g.strokeStyle = '#f4ead8';
+    g.lineWidth = 0.7;
+    g.beginPath(); g.moveTo(23.4, 12); g.lineTo(23.4, 24); g.stroke();
+    disc(g, 15.3, 11.2, 0.5, '#2a1c10');
+  });
+  spr.gy = 33;
+  return spr;
+}
+
+function pal(tier) {
+  if (tier >= 3) return {
+    wall: '#dcd8d0', wallD: '#9a9590', side: '#6a6560',
+    top: '#e4e0d8', face: '#b0aaa4', ink: '#3a3834',
+    roof: '#6a6864', roofL: '#9a968e', roofD: '#3e3c38',
+    metal: '#4a4e55', metalL: '#8a9098', metalD: '#2a2c30',
+    door: '#3a3c42', trim: '#2a2c30', wood: '#8a5a32',
+    glass: '#c8d8ef'
+  };
+  if (tier >= 2) return {
+    wall: '#f3eadc', wallD: '#d4c8b4', side: '#a89886',
+    top: '#e7e2d8', face: '#c9c2b4', ink: '#7a7064',
+    roof: '#c45a3a', roofL: '#e89070', roofD: '#8a3c28',
+    metal: '#8f877c', metalL: '#c9c2b4', metalD: '#5c564c',
+    door: '#5c3a24', trim: '#6e6558', wood: '#c4925a',
+    glass: '#ffd27a'
+  };
+  return {
+    wall: '#f6ead4', wallD: '#d9c4a2', side: '#b07a45',
+    top: '#d2a56c', face: '#b07a45', ink: '#4a2e1c',
+    roof: '#d06a45', roofL: '#f2a27c', roofD: '#a34c30',
+    metal: '#6e4328', metalL: '#d2a56c', metalD: '#4a2e1c',
+    door: '#6e4328', trim: '#6e4328', wood: '#c4925a',
+    glass: '#ffd27a'
+  };
+}
+function rivets(g, pts, p) {
+  g.fillStyle = p.metalD;
+  for (const [x, y] of pts) disc(g, x, y, 0.85, p.metalD);
+  g.fillStyle = p.metalL;
+  for (const [x, y] of pts) disc(g, x - 0.25, y - 0.3, 0.4, p.metalL);
+}
+function ironBand(g, x, y, w, h, p) {
+  g.fillStyle = p.metal;
+  g.fillRect(x, y, w, h);
+  g.fillStyle = p.metalL;
+  g.fillRect(x, y, w, 1);
+  g.fillStyle = p.metalD;
+  g.fillRect(x, y + h - 1, w, 1);
+}
+function crenels(g, x, y, w, n, p, iron) {
+  const cw = w / n;
+  for (let i = 0; i < n; i++) {
+    if (i % 2 === 0) {
+      g.fillStyle = p.wall;
+      g.fillRect(x + i * cw, y - 6, cw - 0.6, 7);
+      if (iron) {
+        g.fillStyle = p.metal;
+        g.fillRect(x + i * cw, y - 7, cw - 0.6, 2.2);
+      }
+    }
+  }
+}
+function woodPlanks(g, x, y, w, h, p) {
+  g.strokeStyle = p.ink;
+  g.globalAlpha = 0.45;
+  g.lineWidth = 1;
+  g.beginPath();
+  for (let i = x + 5; i < x + w; i += 6) { g.moveTo(i, y); g.lineTo(i - 1.4, y + h); }
+  g.stroke();
+  g.globalAlpha = 1;
+}
+function stoneJoints(g, x, y, w, h, p) {
+  g.strokeStyle = p.ink;
+  g.globalAlpha = 0.58;
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(x, y + h * 0.45); g.lineTo(x + w, y + h * 0.45);
+  g.moveTo(x + w * 0.28, y); g.lineTo(x + w * 0.24, y + h * 0.45);
+  g.moveTo(x + w * 0.62, y); g.lineTo(x + w * 0.58, y + h * 0.45);
+  g.moveTo(x + w * 0.18, y + h * 0.45); g.lineTo(x + w * 0.16, y + h);
+  g.moveTo(x + w * 0.5, y + h * 0.45); g.lineTo(x + w * 0.48, y + h);
+  g.moveTo(x + w * 0.8, y + h * 0.45); g.lineTo(x + w * 0.78, y + h);
+  g.stroke();
+  g.globalAlpha = 1;
+}
+
+function paintKeep(tier) {
+  const p = pal(tier);
+  const w = tier === 1 ? 78 : tier === 2 ? 94 : 110;
+  const h = tier === 1 ? 100 : tier === 2 ? 120 : 140;
+  const spr = bake(w, h, g => {
+    const cx = w / 2, base = h - 4;
+    const bw = tier === 1 ? 36 : tier === 2 ? 44 : 52;
+    const bh = tier === 1 ? 44 : tier === 2 ? 54 : 64;
+    const x0 = cx - bw * 0.55, y0 = base - bh;
+    // mound
+    ell(g, cx + 2, base + 1, bw * 0.72, 8, '#cbbda8');
+    ell(g, cx - 8, base, bw * 0.42, 5.5, '#e6dcc8');
+    // side hall
+    const hx = x0 + bw + 2, hy = base - (tier === 1 ? 20 : tier === 2 ? 26 : 32);
+    const hw = tier === 1 ? 18 : tier === 2 ? 22 : 26;
+    const hh = tier === 1 ? 20 : tier === 2 ? 26 : 32;
+    poly(g, [[hx, hy], [hx + hw, hy - 5], [hx + hw, hy + hh - 5], [hx, hy + hh]], p.side);
+    poly(g, [[hx, hy], [hx + hw - 4, hy + 2], [hx + hw - 4, hy + hh], [hx, hy + hh]], p.wallD);
+    // main body
+    poly(g, [[x0, y0], [x0 + bw, y0], [x0 + bw, base], [x0, base]], p.wall);
+    poly(g, [[x0 + bw, y0], [x0 + bw + 8, y0 - 6], [x0 + bw + 8, base - 6], [x0 + bw, base]], p.side);
+    if (tier === 1) woodPlanks(g, x0, y0, bw, bh, p);
+    else stoneJoints(g, x0, y0, bw, bh, p);
+    if (tier >= 3) {
+      ironBand(g, x0, y0 + 14, bw, 5, p);
+      ironBand(g, x0, base - 10, bw, 5, p);
+      rivets(g, [[x0 + 5, y0 + 16.5], [x0 + bw / 2, y0 + 16.5], [x0 + bw - 5, y0 + 16.5],
+                 [x0 + 5, base - 7.5], [x0 + bw / 2, base - 7.5], [x0 + bw - 5, base - 7.5]], p);
+    }
+    // merlons / timber top
+    if (tier >= 2) crenels(g, x0, y0, bw, tier === 2 ? 6 : 8, p, tier >= 3);
+    else {
+      g.fillStyle = p.wall;
+      g.fillRect(x0, y0 - 8, 10, 9);
+      g.fillRect(x0 + 14, y0 - 6, 9, 7);
+    }
+    // door
+    g.fillStyle = p.door;
+    const dw = tier === 1 ? 8 : 9, dh = tier === 1 ? 14 : 16;
+    g.fillRect(x0 + bw * 0.28, base - dh, dw, dh);
+    if (tier >= 3) {
+      ironBand(g, x0 + bw * 0.28, base - dh + 4, dw, 2.2, p);
+      disc(g, x0 + bw * 0.28 + dw - 2, base - dh / 2, 1.1, '#f0c14a');
+    } else {
+      disc(g, x0 + bw * 0.28 + dw - 2, base - dh / 2, 1, '#f0c14a');
+    }
+    // window
+    g.fillStyle = p.glass;
+    g.fillRect(x0 + bw * 0.62, y0 + (tier === 1 ? 16 : 18), 6, 7);
+    g.strokeStyle = p.trim; g.lineWidth = 0.8;
+    g.beginPath();
+    g.moveTo(x0 + bw * 0.62 + 3, y0 + (tier === 1 ? 16 : 18));
+    g.lineTo(x0 + bw * 0.62 + 3, y0 + (tier === 1 ? 23 : 25));
+    g.moveTo(x0 + bw * 0.62, y0 + (tier === 1 ? 19.5 : 21.5));
+    g.lineTo(x0 + bw * 0.62 + 6, y0 + (tier === 1 ? 19.5 : 21.5));
+    g.stroke();
+    // roof over side hall
+    const ry = hy + 2;
+    poly(g, [[hx - 3, ry + 6], [hx + hw * 0.45, ry - 12], [hx + hw + 3, ry]], p.roof);
+    poly(g, [[hx + hw * 0.45, ry - 12], [hx + hw + 6, ry - 6], [hx + hw + 3, ry]], p.roofD);
+    poly(g, [[hx - 3, ry + 6], [hx + hw * 0.45, ry - 12], [hx + 6, ry - 2]], p.roofL);
+    if (tier >= 3) {
+      g.strokeStyle = p.metal; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(hx - 2, ry + 5); g.lineTo(hx + hw * 0.45, ry - 12); g.lineTo(hx + hw + 5, ry - 5); g.stroke();
+    }
+    // bushes
+    ell(g, x0 - 4, base - 10, 6, 4.4, '#5f8a3c');
+    ell(g, x0 + 4, base - 18, 4, 3.2, '#8fbc5a');
+    ell(g, hx + hw + 2, base - 2, 5, 2.6, '#a89e90');
+    // flagpole
+    const fx = x0 + 8, fy = y0 - (tier >= 2 ? 22 : 18);
+    g.fillStyle = '#5c4030';
+    g.fillRect(fx, fy, 2.6, tier >= 2 ? 24 : 20);
+    disc(g, fx + 1.3, fy, 2.2, '#f0c14a');
+    // static flag
+    g.fillStyle = '#3e74c8';
+    g.beginPath();
+    g.moveTo(fx + 2.6, fy + 1);
+    g.lineTo(fx + 22, fy + 4);
+    g.lineTo(fx + 20, fy + 13);
+    g.lineTo(fx + 2.6, fy + 12);
+    g.fill();
+    disc(g, fx + 12, fy + 7.5, 1.7, '#f0c14a');
+    // flame on annex
+    poly(g, [[hx + 6, hy + 8], [hx + 3, hy + 1], [hx + 6, hy + 3], [hx + 8, hy - 2], [hx + 10, hy + 4], [hx + 9, hy + 8]], '#ff9a3a');
+    poly(g, [[hx + 6.5, hy + 7], [hx + 5.5, hy + 3], [hx + 7, hy + 1], [hx + 8, hy + 5]], '#ffe08a');
+    // archer on L2+
+    if (tier >= 2) {
+      const ax = x0 + bw * 0.72, ay = y0 - 2;
+      g.fillStyle = '#5c4030';
+      g.fillRect(ax - 3, ay - 8, 2.4, 8);
+      g.fillRect(ax + 1, ay - 8, 2.4, 8);
+      ell(g, ax, ay - 10, 4.2, 4.6, '#6e9a4a');
+      g.fillStyle = '#3e74c8';
+      g.fillRect(ax - 3, ay - 12, 6, 1.8);
+      disc(g, ax, ay - 16.5, 2.5, '#e6b898');
+      g.fillStyle = '#5c4030';
+      g.beginPath(); g.arc(ax, ay - 16.5, 2.7, Math.PI * 1.05, Math.PI * 1.95);
+      g.quadraticCurveTo(ax + 3.2, ay - 20, ax, ay - 21);
+      g.quadraticCurveTo(ax - 3.2, ay - 20, ax - 2.6, ay - 16.5);
+      g.fill();
+      g.strokeStyle = '#6b4630'; g.lineWidth = 1.2;
+      g.beginPath(); g.arc(ax + 6, ay - 11, 5, -1.2, 1.2); g.stroke();
+      g.strokeStyle = '#f4ead8'; g.lineWidth = 0.6;
+      g.beginPath(); g.moveTo(ax + 7.2, ay - 15); g.lineTo(ax + 7.2, ay - 7); g.stroke();
+    }
+  });
+  spr.gy = h - 4;
+  return spr;
+}
+
+function paintHouse(tier) {
+  const p = pal(tier);
+  const w = tier === 1 ? 48 : tier === 2 ? 64 : 80;
+  const h = tier === 1 ? 52 : tier === 2 ? 66 : 80;
+  const spr = bake(w, h, g => {
+    const base = h - 2;
+    const bw = tier === 1 ? 26 : tier === 2 ? 36 : 46;
+    const bh = tier === 1 ? 20 : tier === 2 ? 26 : 32;
+    const x0 = tier === 1 ? 8 : 10;
+    const y0 = base - bh;
+    const side = tier === 1 ? 9 : 10;
+    poly(g, [[x0, y0], [x0 + bw, y0], [x0 + bw, base], [x0, base]], p.wall);
+    poly(g, [[x0 + bw, y0], [x0 + bw + side, y0 - 6], [x0 + bw + side, base - 6], [x0 + bw, base]], p.wallD);
+    if (tier === 1) {
+      g.strokeStyle = 'rgba(120,80,40,.28)'; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x0, y0 + 6); g.lineTo(x0 + bw, y0 + 6); g.moveTo(x0, y0 + 13); g.lineTo(x0 + bw, y0 + 13); g.stroke();
+    } else stoneJoints(g, x0, y0, bw, bh, p);
+    if (tier >= 3) {
+      ironBand(g, x0, y0 + 8, bw, 4, p);
+      rivets(g, [[x0 + 5, y0 + 10], [x0 + bw / 2, y0 + 10], [x0 + bw - 5, y0 + 10]], p);
+    }
+    // door
+    g.fillStyle = p.door;
+    const dw = 7, dh = tier === 1 ? 12 : 14;
+    g.fillRect(x0 + 4, base - dh, dw, dh);
+    // windows — 1, 2, then 3
+    const wins = tier;
+    const wy = y0 + (tier === 1 ? 4 : 6);
+    const start = x0 + 14;
+    for (let i = 0; i < wins; i++) {
+      const wx = start + i * (tier === 3 ? 10 : 11);
+      g.fillStyle = p.glass;
+      g.fillRect(wx, wy, 6.5, 5.5);
+      g.strokeStyle = p.trim; g.lineWidth = 0.8;
+      g.beginPath(); g.moveTo(wx + 3.2, wy); g.lineTo(wx + 3.2, wy + 5.5); g.moveTo(wx, wy + 2.7); g.lineTo(wx + 6.5, wy + 2.7); g.stroke();
+    }
+    // roof
+    const apexX = x0 + bw * 0.5, apexY = y0 - (tier === 1 ? 18 : tier === 2 ? 22 : 26);
+    poly(g, [[x0 - 4, y0 + 2], [apexX, apexY], [x0 + bw + 2, y0 + 2]], p.roof);
+    poly(g, [[apexX, apexY], [x0 + bw + side + 2, y0 - 4], [x0 + bw + 2, y0 + 2]], p.roofD);
+    poly(g, [[x0 - 4, y0 + 2], [apexX, apexY], [x0 + 8, y0 - 6]], p.roofL);
+    if (tier >= 3) {
+      g.strokeStyle = p.metal; g.lineWidth = 2.2;
+      g.beginPath(); g.moveTo(x0 - 3, y0 + 1); g.lineTo(apexX, apexY); g.lineTo(x0 + bw + side + 1, y0 - 4); g.stroke();
+    }
+    // chimney
+    const cx = x0 + bw + 2, cy = apexY + (tier === 1 ? 8 : 10);
+    g.fillStyle = tier >= 3 ? p.metal : '#8d8478';
+    g.fillRect(cx, cy, 5, 12);
+    g.fillStyle = tier >= 3 ? p.metalD : '#6e4328';
+    g.fillRect(cx + 1, cy - 2, 3, 3);
+    if (tier >= 3) rivets(g, [[cx + 2.5, cy + 4], [cx + 2.5, cy + 9]], p);
+  });
+  spr.gy = h - 2;
+  spr.smoke = { dx: (tier === 1 ? 14 : tier === 2 ? 20 : 26), dy: -(tier === 1 ? 40 : tier === 2 ? 50 : 62) };
+  return spr;
+}
+
+function paintWallSeg(tier) {
+  const p = pal(tier);
+  const w = tier === 1 ? 42 : tier === 2 ? 46 : 52;
+  const h = tier === 1 ? 30 : tier === 2 ? 36 : 46;
+  const spr = bake(w, h, g => {
+    const topY = tier === 1 ? 12 : tier === 2 ? 12 : 16;
+    const faceB = h - 2;
+    poly(g, [[4, topY], [w - 6, topY - 2], [w - 10, topY + 6], [2, topY + 6]], p.top);
+    poly(g, [[2, topY + 6], [w - 10, topY + 6], [w - 10, faceB], [2, faceB]], p.face);
+    poly(g, [[w - 10, topY + 6], [w - 6, topY - 2], [w - 6, faceB - 8], [w - 10, faceB]], p.side);
+    g.strokeStyle = p.ink;
+    g.globalAlpha = 0.55;
+    g.lineWidth = 1;
+    g.beginPath();
+    if (tier === 1) {
+      for (let x = 8; x <= w - 12; x += 6) { g.moveTo(x + 2, topY); g.lineTo(x - 1, faceB); }
+    } else {
+      g.moveTo(2, topY + 14); g.lineTo(w - 10, topY + 13);
+      g.moveTo(12, topY + 6); g.lineTo(11, topY + 14);
+      g.moveTo(22, topY + 6); g.lineTo(21, topY + 14);
+      g.moveTo(8, topY + 14); g.lineTo(7, faceB);
+      g.moveTo(18, topY + 14); g.lineTo(17, faceB);
+      g.moveTo(28, topY + 13); g.lineTo(27, faceB);
+    }
+    g.stroke();
+    g.globalAlpha = 1;
+    if (tier === 1) {
+      for (let x = 4; x <= w - 12; x += 6) poly(g, [[x, topY], [x + 3, topY - 5], [x + 6, topY - 1]], p.top);
+    }
+    if (tier >= 3) {
+      ironBand(g, 2, topY + 7, w - 12, 3.4, p);
+      // spikes
+      for (let x = 6; x <= w - 14; x += 7) {
+        poly(g, [[x, topY], [x + 2.3, topY - 10], [x + 4.6, topY]], p.metal);
+        poly(g, [[x + 0.8, topY], [x + 2.3, topY - 8], [x + 2.8, topY]], p.metalL);
+      }
+      rivets(g, [[6, topY + 8.7], [16, topY + 8.7], [26, topY + 8.7], [w - 16, topY + 8.7]], p);
+    }
+    g.strokeStyle = 'rgba(255,255,255,.4)';
+    g.lineWidth = 1;
+    g.beginPath(); g.moveTo(8, topY + 1); g.lineTo(w - 12, topY - 0.6); g.stroke();
+  });
+  spr.gy = h - 4;
+  return spr;
+}
+
+function paintGate(tier) {
+  const p = pal(tier);
+  const w = tier === 1 ? 44 : tier === 2 ? 54 : 64;
+  const h = tier === 1 ? 38 : tier === 2 ? 50 : 62;
+  const spr = bake(w, h, g => {
+    const base = h - 4;
+    const left = 2, right = w - 2, mid = w / 2;
+    const pillarW = tier === 1 ? 8 : 10;
+    const topY = tier === 1 ? 14 : tier === 2 ? 16 : 18;
+    poly(g, [[left, topY], [left + pillarW, topY - 2], [left + pillarW, base], [left, base]], p.face);
+    poly(g, [[right - pillarW, topY - 2], [right, topY - 4], [right, base - 2], [right - pillarW, base]], p.side);
+    poly(g, [[left + pillarW, topY - 2], [right - pillarW, topY - 2], [right - pillarW, base], [left + pillarW, base]], p.face);
+    poly(g, [[left, topY], [mid, topY - 10], [right, topY - 4], [right - pillarW, topY - 2], [left + pillarW, topY - 2]], p.top);
+    poly(g, [[left + pillarW, topY - 2], [mid, topY - 6], [right - pillarW, topY - 2], [right - pillarW, topY + 4], [mid, topY + 2], [left + pillarW, topY + 4]], p.top);
+    if (tier === 1) woodPlanks(g, left + pillarW, topY + 4, right - left - pillarW * 2, base - topY - 4, p);
+    else stoneJoints(g, left, topY + 6, pillarW, base - topY - 6, p);
+    if (tier >= 3) {
+      ironBand(g, left, topY + 8, pillarW, 3.5, p);
+      ironBand(g, right - pillarW, topY + 8, pillarW, 3.5, p);
+    }
+    if (tier >= 2) {
+      // Flat gatehouse parapet with merlons sitting on it
+      const py = topY - 6;
+      poly(g, [[left, topY + 2], [right, topY], [right, py], [left, py + 2]], p.top);
+      poly(g, [[right - 2, py], [right + 3, py - 3], [right + 3, topY - 3], [right, topY]], p.side);
+      const n = 6, span = right - left - 4;
+      for (let i = 0; i < n; i++) {
+        if (i % 2) continue;
+        const x = left + 2 + i * (span / n);
+        const cw = span / n - 0.8;
+        g.fillStyle = p.wall;
+        g.fillRect(x, py - 7, cw, 8);
+        if (tier >= 3) {
+          g.fillStyle = p.metal;
+          g.fillRect(x, py - 8.5, cw, 2.2);
+        }
+      }
+    }
+    // doors
+    const woodL = p.wood, woodR = p.door;
+    const dL = left + pillarW + 1, dR = right - pillarW - 1, dT = topY + 4;
+    poly(g, [[dL, dT], [mid, dT - 1], [mid, base], [dL, base]], woodL);
+    poly(g, [[mid, dT - 1], [dR, dT], [dR, base], [mid, base]], woodR);
+    g.strokeStyle = p.ink; g.lineWidth = 1.1;
+    g.beginPath(); g.moveTo(mid, dT - 1); g.lineTo(mid, base); g.stroke();
+    if (tier >= 3) {
+      // portcullis + spikes
+      g.strokeStyle = p.metal; g.lineWidth = 1.3;
+      g.beginPath();
+      for (let x = dL + 3; x < dR; x += 5) { g.moveTo(x, dT + 1); g.lineTo(x, base - 2); }
+      for (let y = dT + 5; y < base - 4; y += 6) { g.moveTo(dL + 1, y); g.lineTo(dR - 1, y); }
+      g.stroke();
+      for (let x = dL + 3; x < dR; x += 5) {
+        poly(g, [[x - 1.4, dT + 1], [x, dT - 6], [x + 1.4, dT + 1]], p.metal);
+      }
+    } else {
+      g.fillStyle = '#f0c14a';
+      g.beginPath(); g.arc(mid - 3, (dT + base) / 2, 1.3, 0, 7); g.arc(mid + 3, (dT + base) / 2, 1.3, 0, 7); g.fill();
+    }
+    g.strokeStyle = 'rgba(255,255,255,.4)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(left + 4, topY - 4); g.lineTo(mid, topY - 9); g.lineTo(right - 4, topY - 3); g.stroke();
+  });
+  spr.gy = h - 6;
+  return spr;
+}
+
+function paintTowerWood() {
+  const p = pal(1);
+  const spr = bake(50, 74, g => {
+    poly(g, [[14, 56], [34, 56], [40, 50], [18, 50]], p.wallD);
+    poly(g, [[14, 56], [34, 56], [34, 62], [14, 62]], p.wall);
+    poly(g, [[34, 56], [40, 50], [40, 56], [34, 62]], p.side);
+    poly(g, [[14, 30], [34, 30], [34, 56], [14, 56]], p.wall);
+    poly(g, [[34, 30], [42, 24], [42, 50], [34, 56]], p.side);
+    poly(g, [[14, 30], [34, 30], [42, 24], [22, 24]], p.wallD);
+    woodPlanks(g, 14, 30, 20, 26, p);
+    poly(g, [[20, 56], [28, 56], [28, 46], [24, 43], [20, 46]], '#5c3a24');
+    g.fillStyle = p.wall;
+    g.fillRect(15, 24, 6, 8);
+    g.fillRect(24, 24, 6, 8);
+    poly(g, [[24, 4], [8, 26], [24, 34]], p.roof);
+    poly(g, [[24, 4], [44, 24], [24, 34]], p.roofD);
+    poly(g, [[24, 4], [8, 26], [18, 18]], p.roofL);
+    disc(g, 22, 44, 2.2, '#e6b898');
+    g.fillStyle = '#3e74c8';
+    g.fillRect(20, 45.4, 4.2, 3.2);
+    g.strokeStyle = '#6b4630';
+    g.lineWidth = 1.1;
+    g.beginPath(); g.arc(28, 45, 3.3, -1.15, 1.05); g.stroke();
+    g.strokeStyle = '#efe6d4';
+    g.lineWidth = 0.7;
+    g.beginPath(); g.moveTo(31, 42.6); g.lineTo(31, 47.6); g.stroke();
+    g.fillStyle = '#5c4030';
+    g.fillRect(23, 4, 2, 10);
+    g.fillStyle = '#3e74c8';
+    g.beginPath();
+    g.moveTo(25, 5);
+    g.lineTo(37, 7.5);
+    g.lineTo(35.5, 13);
+    g.lineTo(25, 12);
+    g.fill();
+    disc(g, 30, 9, 1.3, '#f0c14a');
+    disc(g, 24, 4, 1.6, '#f0c14a');
+  });
+  spr.gy = 58;
+  spr.flag = { dx: -1, dy: -54, w: 14, h: 8 };
+  return spr;
+}
+
+function paintCannon(tier) {
+  const p = pal(tier);
+  const w = tier === 2 ? 70 : 84;
+  const h = tier === 2 ? 84 : 100;
+  const spr = bake(w, h, g => {
+    const cx = w / 2, base = h - 4;
+    const bw = tier === 2 ? 32 : 40, bh = tier === 2 ? 36 : 46;
+    const x0 = cx - bw / 2 - 2, y0 = base - bh;
+    ell(g, cx, base + 1, bw * 0.7, 7, '#cbbda8');
+    poly(g, [[x0, y0], [x0 + bw, y0], [x0 + bw, base], [x0, base]], p.wall);
+    poly(g, [[x0 + bw, y0], [x0 + bw + 8, y0 - 6], [x0 + bw + 8, base - 6], [x0 + bw, base]], p.side);
+    poly(g, [[x0, y0], [x0 + bw, y0], [x0 + bw + 8, y0 - 6], [x0 + 8, y0 - 6]], p.wallD);
+    stoneJoints(g, x0, y0, bw, bh, p);
+    crenels(g, x0, y0, bw, tier === 2 ? 5 : 6, p, tier >= 3);
+    if (tier >= 3) {
+      ironBand(g, x0, y0 + 12, bw, 5, p);
+      ironBand(g, x0, base - 10, bw, 5, p);
+      rivets(g, [[x0 + 6, y0 + 14.5], [x0 + bw / 2, y0 + 14.5], [x0 + bw - 6, y0 + 14.5]], p);
+    }
+    // door
+    g.fillStyle = p.door;
+    g.fillRect(x0 + 6, base - 14, 8, 14);
+    // cannon barrel pointing right
+    const bx = x0 + bw - 2, by = y0 + bh * 0.38;
+    const bl = tier === 2 ? 22 : 28;
+    const thick = tier === 2 ? 7 : 9;
+    const barrel = tier >= 3 ? p.metal : '#6a5a48';
+    const barrelL = tier >= 3 ? p.metalL : '#8a7a64';
+    poly(g, [[bx, by], [bx + bl, by - 4], [bx + bl + 2, by + thick - 2], [bx, by + thick + 2]], barrel);
+    poly(g, [[bx, by], [bx + bl, by - 4], [bx + bl, by + 1], [bx, by + 3]], barrelL);
+    // muzzle
+    ell(g, bx + bl + 1, by + thick * 0.35, 2.4, thick * 0.55, '#1a1612');
+    ell(g, bx + bl + 0.4, by + thick * 0.3, 1.2, thick * 0.28, '#4a4038');
+    // trunnion / carriage
+    disc(g, bx + 3, by + thick, 3.2, p.metalD);
+    disc(g, bx + 3, by + thick, 2, p.metal);
+    // shot pile
+    const sx = x0 + (tier === 2 ? 16 : 20), sy = base - 6;
+    disc(g, sx, sy, tier === 2 ? 3.2 : 4, '#5c5850');
+    disc(g, sx + 6, sy - 1, tier === 2 ? 2.8 : 3.6, '#3a3834');
+    if (tier >= 3) disc(g, sx + 3, sy - 5, 3.2, '#4a4e55');
+    // highlight
+    g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x0 + 4, y0 + 2); g.lineTo(x0 + bw - 4, y0 + 2); g.stroke();
+  });
+  spr.gy = h - 4;
+  return spr;
+}
+
+function paintBallista(tier) {
+  const p = pal(tier);
+  const w = tier === 2 ? 62 : 74;
+  const h = tier === 2 ? 100 : 120;
+  const spr = bake(w, h, g => {
+    const cx = w / 2, base = h - 4;
+    const bw = tier === 2 ? 22 : 26, bh = tier === 2 ? 52 : 64;
+    const x0 = cx - bw / 2, y0 = base - bh;
+    ell(g, cx, base + 1, bw * 0.9, 6, '#cbbda8');
+    poly(g, [[x0, y0], [x0 + bw, y0], [x0 + bw, base], [x0, base]], p.wall);
+    poly(g, [[x0 + bw, y0], [x0 + bw + 7, y0 - 5], [x0 + bw + 7, base - 5], [x0 + bw, base]], p.side);
+    poly(g, [[x0, y0], [x0 + bw, y0], [x0 + bw + 7, y0 - 5], [x0 + 7, y0 - 5]], p.wallD);
+    stoneJoints(g, x0, y0, bw, bh, p);
+    if (tier >= 3) {
+      ironBand(g, x0, y0 + 16, bw, 4.5, p);
+      ironBand(g, x0, base - 12, bw, 4.5, p);
+      rivets(g, [[x0 + 5, y0 + 18], [x0 + bw - 5, y0 + 18]], p);
+    }
+    g.fillStyle = p.door;
+    g.fillRect(x0 + 6, base - 16, 8, 16);
+    g.fillStyle = p.glass;
+    g.fillRect(x0 + 7, y0 + 20, 6, 6);
+    crenels(g, x0, y0, bw, 4, p, tier >= 3);
+    // ballista on top
+    const tx = cx, ty = y0 - 2;
+    const arm = tier === 2 ? 18 : 24;
+    const col = tier >= 3 ? p.metal : '#8a5a32';
+    const colL = tier >= 3 ? p.metalL : '#c4925a';
+    // mount
+    g.fillStyle = col;
+    g.fillRect(tx - 3, ty - 8, 6, 10);
+    // arms
+    g.strokeStyle = col; g.lineWidth = tier === 2 ? 2.4 : 3;
+    g.beginPath();
+    g.moveTo(tx - arm, ty - 10); g.quadraticCurveTo(tx, ty - 4, tx + arm, ty - 10);
+    g.stroke();
+    g.strokeStyle = colL; g.lineWidth = 1.2;
+    g.beginPath();
+    g.moveTo(tx - arm + 1, ty - 11); g.quadraticCurveTo(tx, ty - 5, tx + arm - 1, ty - 11);
+    g.stroke();
+    // bowstring
+    g.strokeStyle = '#efe6d4'; g.lineWidth = 0.8;
+    g.beginPath(); g.moveTo(tx - arm, ty - 10); g.lineTo(tx, ty - 6); g.lineTo(tx + arm, ty - 10); g.stroke();
+    // bolt
+    const bl = tier === 2 ? 22 : 30;
+    g.strokeStyle = tier >= 3 ? p.metalD : '#5c4030'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(tx - 4, ty - 7); g.lineTo(tx + bl, ty - 16); g.stroke();
+    poly(g, [[tx + bl, ty - 16], [tx + bl - 5, ty - 19], [tx + bl - 4, ty - 13]], tier >= 3 ? p.metalL : '#d4cbbd');
+    // winch
+    disc(g, tx, ty - 5, 2.4, col);
+    disc(g, tx, ty - 5, 1.2, colL);
+  });
+  spr.gy = h - 4;
+  return spr;
+}
+
+function paintFarm(tier) {
+  const p = pal(tier);
+  const w = tier === 1 ? 64 : tier === 2 ? 78 : 94;
+  const h = tier === 1 ? 40 : tier === 2 ? 52 : 64;
+  const spr = bake(w, h, g => {
+    const soil = tier >= 3 ? '#8a6238' : '#b88858';
+    const soilD = tier >= 3 ? '#6e4a28' : '#a87448';
+    poly(g, [[6, 16], [w - 12, 8], [w - 4, h - 14], [14, h - 6]], soil);
+    poly(g, [[10, 18], [w - 16, 12], [w - 10, h - 16], [16, h - 10]], soilD);
+    g.strokeStyle = '#7a5430'; g.lineWidth = 1.3;
+    for (let i = 0; i < 4 + tier; i++) {
+      g.beginPath(); g.moveTo(12 + i * 2, 18 + i * 3); g.lineTo(w - 18 + i, 12 + i * 2.4); g.stroke();
+    }
+    const rows = 2 + tier, cols = 6 + tier;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const x = 14 + c * ((w - 28) / cols), y = 16 + r * ((h - 28) / rows) + c * 0.3;
+        if (tier >= 3) {
+          ell(g, x, y, 1.7, 3.6, '#e2b14a');
+          ell(g, x, y + 2.4, 1.2, 1.7, '#c4922a');
+        } else if (tier === 2) {
+          ell(g, x, y, 1.5, 3.0, '#d4a63a');
+          ell(g, x, y - 1.2, 1, 1.2, '#b6d46e');
+        } else {
+          ell(g, x, y, 1.6, 2.4, '#7eac52');
+          ell(g, x, y - 1.2, 1, 1.2, '#b6d46e');
+        }
+      }
+    }
+    // posts
+    const posts = [[6, 16], [w - 12, 8], [w - 4, h - 14], [14, h - 6]];
+    for (const [x, y] of posts) {
+      g.fillStyle = tier >= 3 ? p.metalD : '#5c3a24';
+      g.fillRect(x - 1.2, y - (tier === 1 ? 7 : 9), tier >= 3 ? 3 : 2.4, tier === 1 ? 8 : 10);
+      if (tier >= 3) {
+        g.fillStyle = p.metal;
+        g.fillRect(x - 1.6, y - 10, 3.8, 2.2);
+      }
+    }
+    g.strokeStyle = tier >= 3 ? p.metal : (tier === 2 ? '#c9c2b4' : '#c4925a');
+    g.lineWidth = tier >= 3 ? 1.6 : 1.2;
+    g.beginPath();
+    g.moveTo(6, 12); g.lineTo(w - 12, 4); g.lineTo(w - 4, h - 18); g.lineTo(14, h - 10); g.closePath();
+    g.stroke();
+    if (tier >= 3) {
+      const sx = w - 26, sy = 28;
+      poly(g, [[sx, sy], [sx + 12, sy - 2], [sx + 12, sy + 12], [sx, sy + 14]], '#c9c2b4');
+      poly(g, [[sx + 12, sy - 2], [sx + 16, sy - 5], [sx + 16, sy + 9], [sx + 12, sy + 12]], '#8f877c');
+      poly(g, [[sx - 2, sy], [sx + 8, sy - 8], [sx + 16, sy - 5], [sx + 12, sy - 2], [sx, sy]], '#6a6864');
+      g.fillStyle = '#4a4e55';
+      g.fillRect(sx + 3, sy + 4, 5, 8);
+    }
+  });
+  spr.gy = h - 8;
+  return spr;
+}
+
+function paintFort(tier) {
+  const p = pal(tier);
+  const w = tier === 1 ? 78 : tier === 2 ? 94 : 112;
+  const h = tier === 1 ? 86 : tier === 2 ? 102 : 120;
+  const spr = bake(w, h, g => {
+    const base = h - 6;
+    // palisade or stone curtain
+    if (tier === 1) {
+      for (let i = 0; i < 10; i++) {
+        const x = 2 + i * 7.4;
+        g.fillStyle = i % 2 ? '#7a5432' : '#c4925a';
+        g.fillRect(x, base - 28, 6.2, 28);
+        disc(g, x + 3.1, base - 28, 3.3, i % 2 ? '#7a5432' : '#c4925a');
+        g.fillStyle = '#5c3a24';
+        g.fillRect(x + 2, base - 28, 1.2, 28);
+      }
+    } else {
+      const cw = w - 16;
+      const ch = tier === 2 ? 28 : 32;
+      poly(g, [[8, base - ch], [8 + cw - 10, base - ch], [8 + cw - 10, base], [8, base]], p.face);
+      poly(g, [[8 + cw - 10, base - ch], [8 + cw, base - ch - 6], [8 + cw, base - 6], [8 + cw - 10, base]], p.side);
+      stoneJoints(g, 8, base - ch, cw - 10, ch, p);
+      crenels(g, 8, base - ch, cw - 10, tier === 2 ? 8 : 10, p, tier >= 3);
+      if (tier >= 3) ironBand(g, 8, base - 12, cw - 10, 4, p);
+    }
+    const bx = tier === 1 ? 24 : 28, by = base - (tier === 1 ? 42 : 46);
+    const bw = tier === 1 ? 34 : tier === 2 ? 42 : 50;
+    const bh = tier === 1 ? 20 : 24;
+    poly(g, [[bx, by], [bx + bw, by], [bx + bw, by + bh], [bx, by + bh]], p.wall);
+    poly(g, [[bx + bw, by], [bx + bw + 8, by - 6], [bx + bw + 8, by + bh - 6], [bx + bw, by + bh]], p.side);
+    const roofY = by - (tier === 1 ? 18 : 22);
+    poly(g, [[bx - 2, by], [bx + bw * 0.45, roofY], [bx + bw + 2, by + 2]], p.roof);
+    poly(g, [[bx - 2, by], [bx + bw * 0.45, roofY], [bx + 10, by - 8]], p.roofL);
+    poly(g, [[bx + bw * 0.45, roofY], [bx + bw + 10, by - 4], [bx + bw + 2, by + 2]], p.roofD);
+    if (tier >= 3) {
+      g.strokeStyle = p.metal; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(bx - 1, by); g.lineTo(bx + bw * 0.45, roofY); g.lineTo(bx + bw + 8, by - 3); g.stroke();
+    }
+    // left tower
+    const tx = 8, tw = 16, th = tier === 1 ? 32 : 40;
+    g.fillStyle = p.wall;
+    g.fillRect(tx, base - th, tw, th);
+    g.fillStyle = p.side;
+    g.fillRect(tx + tw, base - th + 4, 5, th - 4);
+    poly(g, [[tx + tw / 2, base - th - 16], [tx + tw + 8, base - th + 2], [tx - 4, base - th + 2]], p.roof);
+    poly(g, [[tx + tw / 2, base - th - 16], [tx - 4, base - th + 2], [tx + 4, base - th - 4]], p.roofL);
+    // door + archer
+    g.fillStyle = p.door;
+    g.fillRect(bx + 12, by + bh - 16, 12, 16);
+    disc(g, bx + 22, by + bh - 8, 1.1, '#f0c14a');
+    disc(g, tx + 8, base - th + 14, 2.2, '#e6b898');
+    g.fillStyle = '#3e74c8';
+    g.fillRect(tx + 6, base - th + 15.5, 4, 3);
+    if (tier >= 2) {
+      disc(g, bx + 8, by + 8, 2.2, '#e6b898');
+      g.fillStyle = '#3e74c8';
+      g.fillRect(bx + 6, by + 9.5, 4, 3);
+    }
+    if (tier >= 3) {
+      ironBand(g, tx, base - th + 10, tw, 3.5, p);
+      rivets(g, [[tx + 4, base - th + 11.7], [tx + tw - 4, base - th + 11.7]], p);
+    }
+    g.fillStyle = '#5c4030';
+    g.fillRect(bx + bw * 0.55, roofY - 6, 2.2, 14);
+  });
+  spr.gy = h - 8;
+  return spr;
+}
+
+function paintMine(kind) {
+  const iron = kind === 'iron';
+  const w = 86, h = 70;
+  const spr = bake(w, h, g => {
+    const hill = iron ? '#5c534c' : '#a89886';
+    const hillL = iron ? '#8a7a70' : '#d4cbbd';
+    const hillD = iron ? '#3a342e' : '#6e6558';
+    const ore = iron ? '#8a3c28' : '#c9c2b4';
+    const oreL = iron ? '#c45a3a' : '#e7e2d8';
+    // hill
+    poly(g, [[4, 62], [14, 28], [40, 14], [70, 24], [82, 62]], hill);
+    poly(g, [[14, 30], [40, 16], [52, 28], [28, 40]], hillL);
+    if (iron) {
+      // rust veins
+      g.strokeStyle = oreL; g.lineWidth = 2; g.globalAlpha = 0.7;
+      g.beginPath(); g.moveTo(22, 44); g.lineTo(30, 28); g.lineTo(36, 36); g.stroke();
+      g.beginPath(); g.moveTo(48, 50); g.lineTo(58, 32); g.stroke();
+      g.globalAlpha = 1;
+    }
+    // cut face / entrance
+    poly(g, [[28, 62], [32, 36], [50, 34], [58, 62]], hillD);
+    poly(g, [[34, 58], [36, 40], [48, 39], [52, 58]], '#1a1612');
+    // headframe so it reads as a mine, not a tent
+    const frame = iron ? '#4a4e55' : '#8a5a32';
+    const frameL = iron ? '#8a9098' : '#c4925a';
+    g.fillStyle = frame;
+    g.fillRect(32, 18, 3.2, 44);
+    g.fillRect(50, 18, 3.2, 44);
+    g.fillRect(31, 18, 23, 4);
+    g.fillStyle = frameL;
+    g.fillRect(32, 18, 3.2, 1.4);
+    g.fillRect(50, 18, 3.2, 1.4);
+    g.fillRect(31, 18, 23, 1.4);
+    // cross brace
+    g.strokeStyle = frame; g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(34, 22); g.lineTo(51, 40);
+    g.moveTo(52, 22); g.lineTo(35, 40);
+    g.stroke();
+    // winch beam and bucket
+    g.fillStyle = frame;
+    g.fillRect(40, 14, 14, 3);
+    g.strokeStyle = '#2a1c10'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(52, 17); g.lineTo(52, 28); g.stroke();
+    g.fillStyle = iron ? '#6a4030' : '#c4925a';
+    g.fillRect(49, 28, 6, 5);
+    g.fillStyle = iron ? '#4a2e1c' : '#8a5a32';
+    g.fillRect(49, 32, 6, 1.4);
+    if (iron) {
+      disc(g, 33.6, 20, 1.4, '#2a2c30');
+      disc(g, 51.6, 20, 1.4, '#2a2c30');
+      disc(g, 33.6, 40, 1.4, '#2a2c30');
+      disc(g, 51.6, 40, 1.4, '#2a2c30');
+    }
+    // piles
+    if (iron) {
+      poly(g, [[60, 62], [66, 50], [76, 54], [80, 62]], '#3a342e');
+      poly(g, [[64, 60], [68, 52], [74, 56]], ore);
+      ell(g, 70, 58, 5, 3, oreL);
+      // ingots
+      g.fillStyle = '#6a4030';
+      g.fillRect(62, 58, 8, 3);
+      g.fillStyle = '#a34c30';
+      g.fillRect(63, 55, 7, 3);
+    } else {
+      // cut blocks
+      g.fillStyle = '#d4cbbd';
+      g.fillRect(60, 52, 10, 7);
+      g.fillStyle = '#e7e2d8';
+      g.fillRect(62, 48, 9, 6);
+      g.fillStyle = '#8f877c';
+      g.fillRect(70, 54, 8, 6);
+      g.fillStyle = '#c9c2b4';
+      g.fillRect(72, 50, 7, 5);
+    }
+    // ground gravel
+    ell(g, 20, 62, 8, 2.4, iron ? '#4a4038' : '#b7ad9e');
+    ell(g, 48, 64, 14, 2.8, iron ? '#3a342e' : '#c9c2b4');
+  });
+  spr.gy = 64;
+  return spr;
+}
+
+const Art = {
+  shadow: paintShadow(),
+  coin: paintCoin(),
+  tree: [0, 1, 2].map(paintTree),
+  rock: [0, 1].map(paintRock),
+  archer: paintArcher(0),
+  keep: [1, 2, 3].map(paintKeep),
+  house: [1, 2, 3].map(paintHouse),
+  wall: [1, 2, 3].map(paintWallSeg),
+  gate: [1, 2, 3].map(paintGate),
+  tower1: paintTowerWood(),
+  cannon: [2, 3].map(t => paintCannon(t)),
+  ballista: [2, 3].map(t => paintBallista(t)),
+  farm: [1, 2, 3].map(paintFarm),
+  fort: [1, 2, 3].map(paintFort),
+  mineStone: paintMine('stone'),
+  mineIron: paintMine('iron')
+};
+
+function blit(ctx, spr, x, y, opt) {
+  if (!spr || !spr.c) return;
+  const gy = spr.gy != null ? spr.gy : spr.h;
+  const sc = (opt && opt.sc) || 1;
+  const bob = (opt && opt.bob) || 0;
+  ctx.save();
+  ctx.translate(x, y + bob);
+  if (opt && opt.flip) ctx.scale(-1, 1);
+  if (sc !== 1) ctx.scale(sc, sc);
+  ctx.drawImage(spr.c, -spr.w / 2, -gy, spr.w, spr.h);
+  ctx.restore();
+}
+function shadowAt(ctx, x, y, rw, rh) {
+  ctx.drawImage(Art.shadow.c, x - rw, y - rh * 0.45, rw * 2, rh);
+}
+function fillPad(ctx, w, h, wild) {
+  const sky = ctx.createLinearGradient(0, 0, 0, h);
+  if (wild) {
+    sky.addColorStop(0, '#7a8aa0');
+    sky.addColorStop(0.42, '#8a9a7a');
+    sky.addColorStop(1, '#5a6a50');
+  } else {
+    sky.addColorStop(0, '#8ec4e8');
+    sky.addColorStop(0.4, '#c8dca8');
+    sky.addColorStop(1, '#6e9a4a');
+  }
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = wild ? 'rgba(90,110,80,.35)' : 'rgba(232, 196, 96, .18)';
+  ctx.fillRect(0, h * 0.62, w, h * 0.38);
+}
+
+function renderCard(canvas, spr, opt) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const cssW = canvas.clientWidth || 110;
+  const cssH = canvas.clientHeight || 118;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  fillPad(ctx, cssW, cssH, opt && opt.wild);
+  const padX = 6, padY = 8;
+  const maxW = cssW - padX * 2, maxH = cssH - padY * 2;
+  const gw = (opt && opt.groupW) || spr.w;
+  const gh = (opt && opt.groupH) || spr.h;
+  const sc = Math.min(maxW / gw, maxH / gh) * ((opt && opt.fit) || 0.9);
+  const ground = cssH - 10;
+  shadowAt(ctx, cssW / 2, ground, Math.max(12, spr.w * sc * 0.38), Math.max(5, spr.h * sc * 0.08));
+  blit(ctx, spr, cssW / 2, ground, { sc });
+}
+function renderGroup(els) {
+  let gw = 1, gh = 1;
+  for (const el of els) {
+    if (!el._spr) continue;
+    gw = Math.max(gw, el._spr.w);
+    gh = Math.max(gh, el._spr.h);
+  }
+  for (const el of els) {
+    const cv = el.querySelector('canvas');
+    if (cv && el._spr) renderCard(cv, el._spr, Object.assign({}, el._opt || {}, { groupW: gw, groupH: gh }));
+  }
+}
+
+function lvlCard(item) {
+  const el = document.createElement('article');
+  el.className = 'lvl' + (item.start ? ' start' : '');
+  const mat = item.mat || '';
+  el.innerHTML = `
+    <canvas aria-hidden="true"></canvas>
+    <div class="mat ${mat}">${item.matLabel}</div>
+    <div class="cost">${item.cost}</div>
+    <div class="fx">${item.fx}</div>
+    <div class="req">${item.req}</div>`;
+  const cv = el.querySelector('canvas');
+  // size is applied after insert; caller will paint
+  el._spr = item.spr;
+  el._opt = item.opt || null;
+  return el;
+}
+
+const KEEP_L1 = 'Already yours';
+const CATALOG = [
+  {
+    title: 'Keep', tag: 'Gates the others',
+    note: null,
+    levels: [
+      { mat: 'wood', matLabel: 'Wood', cost: 'Starting', start: true, fx: '280 HP', req: 'No mine needed', spr: Art.keep[0] },
+      { mat: 'stone', matLabel: 'Stone', cost: '12 coins', fx: '480 HP · archer on top', req: 'Stone mine', spr: Art.keep[1] },
+      { mat: 'iron', matLabel: 'Iron', cost: '20 coins', fx: '720 HP · archer stays', req: 'Iron mine', spr: Art.keep[2] }
+    ]
+  },
+  {
+    title: 'House', tag: null,
+    levels: [
+      { mat: 'wood', matLabel: 'Wood', cost: '6 coins', fx: '130 HP · 1 worker', req: 'Keep Lv 1', spr: Art.house[0] },
+      { mat: 'stone', matLabel: 'Stone', cost: '12 coins', fx: '220 HP · 2 workers', req: 'Stone mine · Keep Lv 2', spr: Art.house[1] },
+      { mat: 'iron', matLabel: 'Iron', cost: '20 coins', fx: '340 HP · 3 workers', req: 'Iron mine · Keep Lv 3', spr: Art.house[2] }
+    ]
+  },
+  {
+    title: 'Wall', tag: null,
+    levels: [
+      { mat: 'wood', matLabel: 'Wood', cost: '6 coins', fx: '160 HP', req: 'Keep Lv 1', spr: Art.wall[0], opt: { fit: 1.15 } },
+      { mat: 'stone', matLabel: 'Stone', cost: '12 coins', fx: '300 HP', req: 'Stone mine · Keep Lv 2', spr: Art.wall[1], opt: { fit: 1.15 } },
+      { mat: 'iron', matLabel: 'Iron spikes', cost: '20 coins', fx: '480 HP · 8 dmg to attackers', req: 'Iron mine · Keep Lv 3', spr: Art.wall[2], opt: { fit: 1.15 } }
+    ]
+  },
+  {
+    title: 'Gate', tag: 'Proposal',
+    levels: [
+      { mat: 'wood', matLabel: 'Wood', cost: '6 coins', fx: '140 HP · your people pass', req: 'Keep Lv 1', spr: Art.gate[0] },
+      { mat: 'stone', matLabel: 'Stone', cost: '12 coins', fx: '260 HP', req: 'Stone mine · Keep Lv 2', spr: Art.gate[1] },
+      { mat: 'iron', matLabel: 'Iron', cost: '20 coins', fx: '400 HP · 8 dmg to attackers', req: 'Iron mine · Keep Lv 3', spr: Art.gate[2] }
+    ]
+  },
+  {
+    title: 'Farm', tag: 'Proposal',
+    levels: [
+      { mat: 'wood', matLabel: 'Wood', cost: '6 coins', fx: '70 HP · 1 coin / 5s', req: 'Keep Lv 1', spr: Art.farm[0], opt: { fit: 1.05 } },
+      { mat: 'stone', matLabel: 'Stone', cost: '12 coins', fx: '110 HP · 2 coins / 5s', req: 'Stone mine · Keep Lv 2', spr: Art.farm[1], opt: { fit: 1.05 } },
+      { mat: 'iron', matLabel: 'Iron', cost: '20 coins', fx: '160 HP · 3 coins / 5s', req: 'Iron mine · Keep Lv 3', spr: Art.farm[2], opt: { fit: 1.05 } }
+    ]
+  },
+  {
+    title: 'Fort', tag: 'Capture bonus',
+    levels: [
+      { mat: 'wood', matLabel: 'Wood', cost: 'Free on capture', start: true, fx: '260 HP · 220 rng · 13 dmg', req: 'Keep Lv 1', spr: Art.fort[0] },
+      { mat: 'stone', matLabel: 'Stone', cost: '12 coins', fx: '400 HP · 260 rng · 18 dmg · 2 archers', req: 'Stone mine · Keep Lv 2', spr: Art.fort[1] },
+      { mat: 'iron', matLabel: 'Iron', cost: '20 coins', fx: '600 HP · 300 rng · 24 dmg · 2 archers', req: 'Iron mine · Keep Lv 3', spr: Art.fort[2] }
+    ]
+  }
+];
+
+function paintRowCards(root) {
+  root.querySelectorAll('.lvl').forEach(el => {
+    const cv = el.querySelector('canvas');
+    if (cv && el._spr) renderCard(cv, el._spr, el._opt);
+  });
+}
+
+function buildCatalog() {
+  const host = document.getElementById('catalog-rows');
+  for (const row of CATALOG) {
+    const sec = document.createElement('section');
+    sec.className = 'row';
+    const h = document.createElement('h3');
+    h.textContent = row.title;
+    if (row.tag) {
+      const t = document.createElement('span');
+      t.className = 'tag';
+      t.textContent = row.tag;
+      h.appendChild(t);
+    }
+    sec.appendChild(h);
+    const grid = document.createElement('div');
+    grid.className = 'levels';
+    for (const lv of row.levels) grid.appendChild(lvlCard(lv));
+    sec.appendChild(grid);
+    host.appendChild(sec);
+  }
+}
+
+function buildTowers() {
+  const host = document.getElementById('tower-tree');
+  host.innerHTML = `<h3>Tower</h3>
+    <div class="tower-tree">
+      <div class="trunk" id="tower-l1"></div>
+      <div class="fork" aria-hidden="true">
+        <svg viewBox="0 0 100 28" preserveAspectRatio="none">
+          <path d="M50 0 v8 C50 18 22 18 22 28" fill="none" stroke="#e6c27a" stroke-width="2.4"/>
+          <path d="M50 0 v8 C50 18 78 18 78 28" fill="none" stroke="#e6c27a" stroke-width="2.4"/>
+        </svg>
+      </div>
+      <div class="branches">
+        <div class="path" id="path-cannon">
+          <div class="path-label">Cannon path</div>
+        </div>
+        <div class="path" id="path-ballista">
+          <div class="path-label">Ballista path</div>
+        </div>
+      </div>
+    </div>`;
+  const l1 = lvlCard({
+    mat: 'wood', matLabel: 'Wood', cost: '6 coins',
+    fx: '120 HP · 1 archer · range 220 · 12 dmg',
+    req: 'Keep Lv 1', spr: Art.tower1
+  });
+  document.getElementById('tower-l1').appendChild(l1);
+  const c2 = lvlCard({
+    mat: 'stone', matLabel: 'Stone cannon', cost: '12 coins',
+    fx: '220 HP · slow blast · crowd hit · 28 dmg · range 200',
+    req: 'Stone mine · Keep Lv 2', spr: Art.cannon[0]
+  });
+  const c3 = lvlCard({
+    mat: 'iron', matLabel: 'Iron cannon', cost: '20 coins',
+    fx: '360 HP · bigger blast · 44 dmg · range 230',
+    req: 'Iron mine · Keep Lv 3', spr: Art.cannon[1]
+  });
+  const b2 = lvlCard({
+    mat: 'stone', matLabel: 'Stone ballista', cost: '12 coins',
+    fx: '200 HP · long bolt · pierces 3 · 22 dmg · range 340',
+    req: 'Stone mine · Keep Lv 2', spr: Art.ballista[0]
+  });
+  const b3 = lvlCard({
+    mat: 'iron', matLabel: 'Iron ballista', cost: '20 coins',
+    fx: '340 HP · pierces 5 · 34 dmg · range 420',
+    req: 'Iron mine · Keep Lv 3', spr: Art.ballista[1]
+  });
+  document.getElementById('path-cannon').appendChild(c2);
+  document.getElementById('path-cannon').appendChild(c3);
+  document.getElementById('path-ballista').appendChild(b2);
+  document.getElementById('path-ballista').appendChild(b3);
+}
+
+function buildMines() {
+  const host = document.getElementById('mine-rows');
+  host.innerHTML = `<h3>Mines</h3><div class="mines" id="mine-grid"></div>`;
+  const grid = document.getElementById('mine-grid');
+  grid.appendChild(lvlCard({
+    mat: 'stone', matLabel: 'Stone mine', cost: 'On wild land', start: true,
+    fx: 'Unlocks stone (level 2) upgrades',
+    req: 'Capture this land', spr: Art.mineStone, opt: { wild: true, fit: 1 }
+  }));
+  grid.appendChild(lvlCard({
+    mat: 'iron', matLabel: 'Iron mine', cost: 'On wild land', start: true,
+    fx: 'Unlocks iron (level 3) upgrades',
+    req: 'Capture this land', spr: Art.mineIron, opt: { wild: true, fit: 1 }
+  }));
+}
+
+function drawVillage() {
+  const canvas = document.getElementById('village');
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const cssW = canvas.clientWidth || 366;
+  const cssH = canvas.clientHeight || 280;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  const sky = ctx.createLinearGradient(0, 0, 0, cssH);
+  sky.addColorStop(0, '#8ec4e8');
+  sky.addColorStop(0.45, '#d4e6b0');
+  sky.addColorStop(1, '#6e9a4a');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, cssW, cssH);
+  const landL = cssW * 0.24, landR = cssW * 0.76;
+  ctx.fillStyle = 'rgba(70,86,70,.40)';
+  ctx.fillRect(0, cssH * 0.48, landL, cssH * 0.52);
+  ctx.fillRect(landR, cssH * 0.48, cssW - landR, cssH * 0.52);
+  ctx.fillStyle = 'rgba(232,196,96,.34)';
+  ctx.fillRect(landL, cssH * 0.48, landR - landL, cssH * 0.52);
+  ctx.strokeStyle = 'rgba(230,194,122,.9)';
+  ctx.setLineDash([5, 5]);
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(landL, cssH * 0.46); ctx.lineTo(landL, cssH); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(landR, cssH * 0.46); ctx.lineTo(landR, cssH); ctx.stroke();
+  ctx.setLineDash([]);
+  const ground = cssH * 0.82;
+  function put(spr, x, y, sc, sh) {
+    shadowAt(ctx, x, y, (sh && sh.w) || spr.w * sc * 0.35, (sh && sh.h) || 7);
+    blit(ctx, spr, x, y, { sc });
+  }
+  // frontier trees, behind the mines
+  put(Art.tree[1], cssW * 0.05, ground - 16, 1.1);
+  put(Art.tree[2], cssW * 0.16, ground - 28, 1.0);
+  put(Art.rock[1], cssW * 0.08, ground + 4, 1.25);
+  put(Art.tree[0], cssW * 0.85, ground - 18, 1.05);
+  put(Art.tree[2], cssW * 0.96, ground - 30, 1.1);
+  put(Art.rock[0], cssW * 0.92, ground + 6, 1.2);
+  // back row: towers and keep, inside your land
+  put(Art.cannon[1], cssW * 0.34, ground - 36, 0.86);
+  put(Art.keep[2], cssW * 0.52, ground - 28, 0.92, { w: 36, h: 11 });
+  put(Art.ballista[1], cssW * 0.68, ground - 40, 0.82);
+  // perimeter wall and gate, only on your land
+  const wallY = ground + 2;
+  const wallL = landL + 10, wallR = landR - 10;
+  const gateX = (wallL + wallR) / 2;
+  for (let x = wallL; x < gateX - 18; x += 20) put(Art.wall[2], x, wallY, 1.2, { w: 16, h: 6 });
+  put(Art.gate[2], gateX, wallY - 2, 0.95);
+  for (let x = gateX + 22; x < wallR; x += 20) put(Art.wall[2], x, wallY, 1.2, { w: 16, h: 6 });
+  // houses and farm in the courtyard, in front of the wall
+  put(Art.house[0], cssW * 0.36, ground + 26, 1.05);
+  put(Art.house[2], cssW * 0.64, ground + 26, 1.0);
+  put(Art.farm[1], cssW * 0.50, ground + 36, 0.82);
+  // mines out on the frontier, in front, fully visible
+  put(Art.mineStone, cssW * 0.12, ground + 18, 1.05, { w: 30, h: 10 });
+  put(Art.mineIron, cssW * 0.88, ground + 18, 1.05, { w: 30, h: 10 });
+  function label(txt, x, y, col, bg) {
+    ctx.font = '800 11px "Segoe UI", "Avenir Next", sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const tw = ctx.measureText(txt).width;
+    const pad = 6, th = 16;
+    ctx.fillStyle = bg || 'rgba(28,20,14,.82)';
+    const x0 = x - tw / 2 - pad, y0 = y - th / 2;
+    ctx.beginPath();
+    const r = 8;
+    ctx.moveTo(x0 + r, y0);
+    ctx.arcTo(x0 + tw + pad * 2, y0, x0 + tw + pad * 2, y0 + th, r);
+    ctx.arcTo(x0 + tw + pad * 2, y0 + th, x0, y0 + th, r);
+    ctx.arcTo(x0, y0 + th, x0, y0, r);
+    ctx.arcTo(x0, y0, x0 + tw + pad * 2, y0, r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = col || '#fff6e4';
+    ctx.fillText(txt, x, y + 0.5);
+  }
+  label('FRONTIER', cssW * 0.12, 16, '#e6c27a');
+  label('YOUR LAND', cssW * 0.5, 16, '#ffd56a');
+  label('FRONTIER', cssW * 0.88, 16, '#e6c27a');
+  label('Cannon', cssW * 0.34, ground - 96, '#ffd56a');
+  label('Iron keep', cssW * 0.52, ground - 124, '#ffd56a');
+  label('Ballista', cssW * 0.72, ground - 108, '#ffd56a');
+  label('Stone mine', cssW * 0.12, ground + 40, '#fff6e4', 'rgba(28,20,14,.88)');
+  label('Iron mine', cssW * 0.88, ground + 40, '#fff6e4', 'rgba(28,20,14,.88)');
+}
+
+function paintAll() {
+  document.querySelectorAll('.levels, .mines, .path, .trunk').forEach(group => {
+    renderGroup([...group.querySelectorAll('.lvl')]);
+  });
+  drawVillage();
+}
+
+buildCatalog();
+buildTowers();
+buildMines();
+paintAll();
+addEventListener('resize', paintAll);
+</script>
+</body>
+</html>
