@@ -2761,7 +2761,9 @@ function startNight() {
     S.bloodMoon = true;
   }
   const claimQ = [];
+  for (const r of S.regions) if (r) r.claimQueued = false;
   for (const r of contested()) {
+    r.claimQueued = true;
     const scale = claimScaleOf(r);
     const cn = Math.max(1, Math.round(n * (TUNE.claimWaveMul || 2) * scale));
     for (let i = 0; i < cn; i++) claimQ.push({ kind: Math.random() < 0.5 ? 'shambler' : 'skeleton', claim: r.id, scale });
@@ -2941,6 +2943,7 @@ function requestPlantBanner(zoneId) {
   }
   const from = r.owner === 'pale' ? 'pale' : 'wild';
   r.claimFrom = from;
+  r.claimQueued = false;
   r.owner = 'contested';
   const hp = Math.round((TUNE.bannerHp || 200) * allyHpMul());
   r.core = mkCore(r, hp);
@@ -2966,6 +2969,7 @@ function failClaim(r) {
   r.owner = from;
   r.core = null;
   r.claimFrom = null;
+  r.claimQueued = false;
   S.mapDirty = true; markNavDirty();
   S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05, bad: 1 });
   const pct = Math.round((claimScaleOf(r) - 1) * 100);
@@ -2980,6 +2984,7 @@ function completeClaim(r) {
   banner.contested = false;
   r.owner = 'player';
   r.claimFrom = null;
+  r.claimQueued = false;
   S.mapDirty = true; markNavDirty();
   S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05 });
   if (from === 'pale') {
@@ -3005,8 +3010,10 @@ function completeClaim(r) {
 }
 function resolveClaims() {
   for (const r of S.regions.slice()) {
-    if (r.owner === 'contested' && r.core && r.core.hp > 0) completeClaim(r);
-    else if (r.owner === 'contested') failClaim(r);
+    if (r.owner !== 'contested') continue;
+    // Planting mid-night does not count — the banner must face the counterattack night first.
+    if (r.claimQueued && r.core && r.core.hp > 0) completeClaim(r);
+    else if (r.claimQueued) failClaim(r);
   }
 }
 
