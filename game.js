@@ -1026,13 +1026,17 @@ function onTap(sx, sy) {
   if (S.build === 'demolish') return tryMarkDemo(w.x, w.y, true);
   if (S.build) return tryPlace(S.build, w.x, w.y);
   const bld = buildingAt(w.x, w.y, Math.max(44, 64 / scale));
-  if (bld) {
-    if (S.sel) clearSel();
-    openInspect(bld);
-    return;
+  const hit = workerAt(w.x, w.y);
+  // A selected worker stays in "tap where to send" mode — don't steal the dest tap for inspect.
+  if (!S.sel && bld) {
+    const bD = dist(bld, w) - (bld.r || 16);
+    const hD = hit ? dist(hit, w) - (hit.r || 9) : 1e9;
+    if (!hit || bD <= hD + 6) {
+      openInspect(bld);
+      return;
+    }
   }
   if (PUI.inspectId) { closeInspect(); return; }
-  const hit = workerAt(w.x, w.y);
   // Prefer a tree/rock under the finger unless a worker is already selected (then a worker tap switches/deselects).
   const decor = decorAt(w.x, w.y, Math.max(28, 48 / scale));
   if (hit) {
