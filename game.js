@@ -25,6 +25,9 @@ const TUNE = {
   buildTime: { wall: 4, tower: 8, farm: 5, house: 6, bow: 5, hammer: 4, scythe: 5, pick: 5, gate: 5 }, repairRate: 14,
   farmEvery: 5, farmCoins: 1,    // a worked farm pays farmCoins every farmEvery s, by day
   coreHome: 280, coreCaptured: 150, coreRetaken: 130, coreKeep: 320,
+  bannerHp: 200, bannerR: 18, bannerPlantRange: 220,
+  claimWaveMul: 2,        // counterattack spawn count vs that night's regular wave
+  claimFailScale: 0.25,   // +25% enemy count AND +25% HP/damage per failed attempt, compounding per zone
   waveBase: 2, wavePerNight: 7, wavePerRegion: 2,
   necroRaiseEvery: 5, leaderDmg: 1.25,
   necroWaveMul: 2, // every 10th day (10, 20, …) the wave is this many times larger and a Necromancer leads
@@ -435,7 +438,8 @@ function paintScoreBreakdown(sc, applied, into) {
 
 function snapshotNightBuildings() {
   if (!isChallenge()) return;
-  S.nightBlds = S.buildings.filter(b => b.owner === 'player' && b.built >= 1 && b.type !== 'core').slice();
+  // Realm Protected: cores/banners never count; contested land is not yours yet, so its buildings (if any) also wait until capture.
+  S.nightBlds = S.buildings.filter(b => b.owner === 'player' && b.built >= 1 && b.type !== 'core' && !isContested(S.regions[b.region])).slice();
   S.lastSpawnAt = S.t;
 }
 function recordNightScore() {
@@ -475,6 +479,8 @@ function enemyMods(kind, spawnIndex, opts) {
   const eliteEvery = TUNE.curseEliteEvery || 4;
   let elite = false;
   if (hasBless('dawn')) { hp *= 0.8; dmg *= 0.8; }
+  const claimScale = opts && opts.claimScale;
+  if (claimScale && claimScale !== 1) { hp *= claimScale; dmg *= claimScale; }
   if (hasCurse('turtle')) hp *= (TUNE.curseTurtleHp || 1.6);
   if (hasCurse('tiger')) dmg *= (TUNE.curseTigerDmg || 1.75);
   if (hasCurse('falcon')) speed *= (TUNE.curseFalconSpeed || 1.75);
@@ -567,7 +573,7 @@ function newGame(opts) {
     seed, t: 0, phase: 'day', phaseT: DAY, day: 1, nights: 0, nightSpawned: false, coins: TUNE.startCoins, trickle: 0,
     regions: [], buildings: [], archers: [], undead: [], guardians: [], fx: [],
     folk: [], drops: [], stands: [], mines: [], camp: null, vagrantT: TUNE.vagrantEvery, rally: false, dropHold: false, dropT: 0, postT: 0,
-    spawnQ: [], spawnT: 0, spawnGap: 1, leader: null, chaos: false, focus: null, waveSrc: null,
+    spawnQ: [], spawnT: 0, spawnGap: 1, claimQ: [], claimT: 0, claimGap: 1, leader: null, chaos: false, focus: null, waveSrc: null,
     build: null, over: false, kills: 0, mapDirty: true, mode, curses, blessings,
     choiceLocks: (mode === 'challenge' && curses.indexOf('choice') >= 0) ? pickChoiceLocks(rnd) : [],
     rubble: [], returnQ: [], spawnIndex: 0,
@@ -656,7 +662,7 @@ function spawnVagrant() {
   const c = S.camp; if (!c) return;
   S.folk.push(mkFolk('vagrant', c.x + (Math.random() - .5) * 60, c.y + 10 + (Math.random() - .5) * 40));
 }
-function isUnownedRegion(r) { return !!r && r.owner !== 'player'; }
+function isUnownedRegion(r) { return !!r && r.owner !== 'player' && r.owner !== 'contested'; }
 function findCampSpot(r) {
   if (!isUnownedRegion(r)) return null;
   const toward = (S.regions && S.regions[0]) || { x: CX, y: CY };
@@ -712,9 +718,23 @@ function refreshCamps() {
   S.camp = nearestCampSpot(S.regions[0]);
   if (S.camp) settleVagrants();
 }
-function mkRegion(id, x, y) { return { id, x, y, name: NAMES[id], owner: 'wild', core: null, bonus: null, weakened: false }; }
-function mkCore(r, hp) { return { id: allocBid(), type: 'core', x: r.x, y: r.y, r: 20, hp, max: hp, region: r.id, keep: false, level: 1 }; }
+function mkRegion(id, x, y) { return { id, x, y, name: NAMES[id], owner: 'wild', core: null, bonus: null, weakened: false, claimFails: 0, claimFrom: null }; }
+function mkCore(r, hp) { return { id: allocBid(), type: 'core', x: r.x, y: r.y, r: 20, hp, max: hp, region: r.id, keep: false, level: 1, owner: 'player', contested: false }; }
 const owned = () => S.regions.filter(r => r.owner === 'player');
+const isContested = r => !!(r && r.owner === 'contested');
+const contested = () => S.regions.filter(isContested);
+function heldCores() { return S.regions.filter(r => r.core && (r.owner === 'player' || r.owner === 'contested')).map(r => r.core); }
+function claimScaleOf(r) { return Math.pow(1 + (TUNE.claimFailScale || 0.25), (r && r.claimFails) || 0); }
+function isClaimable(r) {
+  if (!r || r.owner === 'player' || r.owner === 'contested') return false;
+  if (r.core && r.core.hp > 0) return false;
+  if (S.guardians.some(g => g.region === r.id && g.hp > 0)) return false;
+  return true;
+}
+function bannerSiteId(rid) { return 'site-' + rid; }
+function bannerSiteOf(r) {
+  return { id: bannerSiteId(r.id), type: 'bannerSite', x: r.x, y: r.y, r: 22, region: r.id, owner: 'none', built: 1, level: 1 };
+}
 
 // ---------- toasts / hint ----------
 const TOAST_MAX = 2, toastQ = [];
@@ -879,6 +899,10 @@ $('inspectActions').addEventListener('click', e => {
   else if (act === 'cancel') requestUpgrade(PUI.inspectId, { cancel: true });
   else if (act === 'stock') requestStock(PUI.inspectId);
   else if (act === 'gate') requestSwapGate(PUI.inspectId);
+  else if (act === 'plant') {
+    const t = inspectTarget();
+    if (t) requestPlantBanner(t.region);
+  }
   renderInspect(true);
 });
 
@@ -1117,7 +1141,7 @@ function coreAt(x, y, rad) {
   let best = null, bd = rad;
   const pt = { x, y };
   for (const r of S.regions) {
-    if (!r.core || r.owner !== 'player') continue;
+    if (!r.core || (r.owner !== 'player' && r.owner !== 'contested')) continue;
     const d = dist(r.core, pt) - (r.core.r || 20);
     if (d < bd) { bd = d; best = r.core; }
   }
@@ -1210,7 +1234,7 @@ function tryMarkDemo(x, y, mode) {
   const coreD = core ? dist(core, { x, y }) - (core.r || 20) : 1e9;
   const bD = b ? dist(b, { x, y }) - (b.r || 16) : 1e9;
   if (core && coreD <= bD) {
-    toast('You cannot demolish the Keep', 'bad');
+    toast(isPlayerKeep(core) ? 'You cannot demolish the Keep' : 'You cannot demolish a banner', 'bad');
     return true;
   }
   if (!b) { if (mode) toast('Tap a building to demolish it'); return null; }
@@ -1703,12 +1727,17 @@ function buildingById(id) {
   for (const b of S.buildings) if (b.id === id) return b;
   for (const r of S.regions) if (r.core && r.core.id === id) return r.core;
   for (const m of S.mines || []) if (m.id === id) return m;
+  if (typeof id === 'string' && id.slice(0, 5) === 'site-') {
+    const r = S.regions[+id.slice(5)];
+    if (r && isClaimable(r)) return bannerSiteOf(r);
+  }
   return null;
 }
 function buildingAlive(b) {
   if (!S || !b) return false;
   if (b.type === 'mine') return !!(S.mines && S.mines.includes(b));
   if (b.type === 'core') return !!(S.regions[b.region] && S.regions[b.region].core === b);
+  if (b.type === 'bannerSite') { const r = S.regions[b.region]; return !!(r && isClaimable(r)); }
   return S.buildings.includes(b);
 }
 function inspectables() {
@@ -1716,6 +1745,7 @@ function inspectables() {
   const out = [];
   for (const b of S.buildings) out.push(b);
   for (const r of S.regions) if (r.core && !S.buildings.includes(r.core)) out.push(r.core);
+  for (const r of S.regions) if (isClaimable(r)) out.push(bannerSiteOf(r));
   for (const m of S.mines || []) out.push(m);
   return out;
 }
@@ -1733,7 +1763,8 @@ function tierLabel(lv) { return lv >= 3 ? 'Iron' : lv === 2 ? 'Stone' : 'Wood'; 
 function inspectNameOf(b) {
   if (!b) return 'Building';
   if (b.type === 'mine') return (b.kind === 'iron' ? 'Iron' : 'Stone') + ' mine';
-  if (b.type === 'core' || b.type === 'keep') return isPlayerKeep(b) ? 'Keep' : (b.owner === 'pale' ? 'Pale banner' : 'Banner');
+  if (b.type === 'bannerSite') return 'Banner site';
+  if (b.type === 'core' || b.type === 'keep') return isPlayerKeep(b) ? 'Keep' : (b.owner === 'pale' ? 'Pale banner' : (b.contested ? 'Contested banner' : 'Banner'));
   if (b.type === 'tower' && b.path === 'cannon') return 'Cannon tower';
   if (b.type === 'tower' && b.path === 'ballista') return 'Ballista tower';
   if (b.tool) return NICE[b.tool] || 'Tool stand';
@@ -1752,7 +1783,9 @@ function inspectReason(need) {
   return need.reason || 'Locked';
 }
 function inspectCanAct(b) {
-  return !!(b && b.owner !== 'pale' && (b.type === 'core' ? isPlayerKeep(b) : b.type === 'mine' ? false : true));
+  if (!b || b.owner === 'pale' || b.type === 'mine' || b.type === 'bannerSite') return false;
+  if (b.type === 'core') return isPlayerKeep(b);
+  return true;
 }
 function inspectStatsOf(b) {
   const rows = [];
@@ -1763,6 +1796,20 @@ function inspectStatsOf(b) {
     const working = !!minerAtMine(b);
     push('Status', working ? 'Miner working' : owned ? 'No miner' : 'Wild land');
     push('Region', (r && r.name) || ('Land ' + b.region));
+    return rows;
+  }
+  if (b.type === 'bannerSite' || (b.type === 'core' && (b.contested || isContested(S.regions[b.region])))) {
+    const r = S.regions[b.region];
+    const fails = (r && r.claimFails) || 0;
+    const attempt = fails + 1;
+    const pct = Math.round((claimScaleOf(r) - 1) * 100);
+    push('Status', b.type === 'bannerSite' ? 'Unguarded — plant to contest' : 'Contested');
+    push('Region', (r && r.name) || ('Land ' + b.region));
+    if (b.max) push('Health', Math.max(0, Math.ceil(b.hp)) + ' / ' + b.max);
+    push('Attempt', String(attempt));
+    if (fails) push('Failed attempts', String(fails));
+    if (pct) push('Next host', '+' + pct + '% count and strength');
+    else push('On failure', 'Zone stays enemy; next try +25% count and strength');
     return rows;
   }
   if ((b.built || 0) < 1 && b.type !== 'core') {
@@ -1817,6 +1864,8 @@ function inspectSprite(b) {
     const working = !!minerAtMine(b);
     return getSprite('mine-' + b.kind + (working ? '-working' : '-idle')) || null;
   }
+  if (b.type === 'bannerSite') return Art.bannerSite || null;
+  if (b.type === 'core' && !isPlayerKeep(b)) return (b.contested ? Art.bannerContest : Art.banner) || null;
   if ((b.built || 0) < 1 && b.type !== 'core' && Art.scaffold) return Art.scaffold[b.built < 0.33 ? 0 : b.built < 0.66 ? 1 : 2] || buildingSpr(b);
   return buildingSpr(b) || (isPlayerKeep(b) ? getSprite(spriteIdFor(b)) : null);
 }
@@ -1844,9 +1893,11 @@ function inspectActionSig(b) {
   const need = (b.type !== 'mine' && !b.tool && ((b.built >= 1) || b.type === 'core') && b.owner !== 'pale')
     ? upgradeNeed(b) : {};
   const line = (b.type === 'wall' || b.type === 'gate') ? wallConnected(b).length : 0;
+  const r = S.regions[b.region];
   return [b.id, b.type, b.level || 1, b.path || '', b._pickPath || '', b.built || 0, b.owner || '',
     g && g.paid, g && g.cost, g && Math.round((g.prog || 0) * 20), b.tools, b.paid, S && S.coins,
-    need.lock, need.reason, need.cost, line, !!b.demo].join('|');
+    need.lock, need.reason, need.cost, line, !!b.demo, b.contested, r && r.owner, r && r.claimFails,
+    b.max ? Math.ceil(b.hp) : 0].join('|');
 }
 
 // Discrete upgrade command (ready to send over the network later; no networking now).
@@ -1938,6 +1989,8 @@ function renderInspect(force) {
   let levelTxt = '';
   if (b.type === 'mine') levelTxt = (b.kind === 'iron' ? 'Iron' : 'Stone');
   else if ((b.built || 0) < 1 && b.type !== 'core') levelTxt = 'Under construction';
+  else if (b.type === 'bannerSite') levelTxt = 'Plant to contest';
+  else if (b.contested || (b.type === 'core' && isContested(S.regions[b.region]))) levelTxt = 'Contested';
   else if (b.owner === 'pale') levelTxt = (b.type === 'core' ? 'Pale Host' : (tierLabel(lv) + ' · Pale Host'));
   else levelTxt = tierLabel(lv) + ' · Level ' + lv;
   $('inspectLevel').textContent = levelTxt;
@@ -1973,6 +2026,23 @@ function renderInspect(force) {
     acts.appendChild(btn);
     return btn;
   };
+  if (b.type === 'bannerSite') {
+    const r = S.regions[b.region];
+    const fails = (r && r.claimFails) || 0;
+    const pct = Math.round((claimScaleOf(r) - 1) * 100);
+    lock.hidden = false;
+    lock.textContent = pct
+      ? 'Plant a banner and hold it through the night to capture. This attempt is +' + pct + '% larger and stronger after ' + fails + ' failure' + (fails === 1 ? '' : 's') + '.'
+      : 'Plant a banner and hold it through the night to capture. If it falls, the zone stays enemy and the next attempt is 25% larger and stronger.';
+    addBtn('Plant banner', 'plant');
+    return;
+  }
+  if (b.type === 'core' && (b.contested || isContested(S.regions[b.region]))) {
+    const r = S.regions[b.region];
+    lock.hidden = false;
+    lock.textContent = 'Hold this banner until dawn to capture ' + ((r && r.name) || 'this land') + '. If it falls, the zone stays enemy and the next attempt is 25% larger and stronger.';
+    return;
+  }
   if (b.type === 'mine' || b.owner === 'pale' || ((b.built || 0) < 1 && b.type !== 'core')) {
     lock.hidden = true;
     lock.textContent = '';
@@ -2473,7 +2543,7 @@ function jobValid(j) {
   if (!j) return false;
   if (isUpgradeJob(j)) return true;
   if (isClearJob(j) || isDemoJob(j)) return true;
-  if (j.type === 'core') { const r = S.regions[j.region]; return r.core === j && r.owner === 'player' && j.hp < j.max; }
+  if (j.type === 'core') { const r = S.regions[j.region]; return r.core === j && (r.owner === 'player' || r.owner === 'contested') && j.hp < j.max; }
   return S.buildings.includes(j) && j.owner === 'player' && (j.built < 1 || j.hp < j.max);
 }
 function pickBuildJob(f, night) {
@@ -2496,7 +2566,7 @@ function pickBuildJob(f, night) {
   for (const rk of S.rocks) if (isClearJob(rk)) { const d = dist(rk, f) + (taken.has(rk) ? 600 : 0); if (d < bd) { bd = d; best = rk; } }
   if (best || night) return best;
   for (const b of S.buildings) if (b.owner === 'player' && b.built >= 1 && b.hp < b.max - 0.5) { const d = dist(b, f) + (taken.has(b) ? 600 : 0); if (d < bd) { bd = d; best = b; } }
-  for (const r of owned()) if (r.core && r.core.hp < r.core.max - 0.5) { const d = dist(r.core, f) + (taken.has(r.core) ? 600 : 0); if (d < bd) { bd = d; best = r.core; } }
+  for (const c of heldCores()) if (c.hp < c.max - 0.5) { const d = dist(c, f) + (taken.has(c) ? 600 : 0); if (d < bd) { bd = d; best = c; } }
   return best;
 }
 function onBuilt(b) {
@@ -2690,10 +2760,17 @@ function startNight() {
     q.splice(Math.min(2, q.length), 0, 'necro');
     S.bloodMoon = true;
   }
+  const claimQ = [];
+  for (const r of contested()) {
+    const scale = claimScaleOf(r);
+    const cn = Math.max(1, Math.round(n * (TUNE.claimWaveMul || 2) * scale));
+    for (let i = 0; i < cn; i++) claimQ.push({ kind: Math.random() < 0.5 ? 'shambler' : 'skeleton', claim: r.id, scale });
+  }
   // An empty wave never starts night — stay in (or return to) day.
-  if (!q.length) { S.phase = 'day'; S.phaseT = DAY; S.spawnQ = []; return; }
+  if (!q.length && !claimQ.length) { S.phase = 'day'; S.phaseT = DAY; S.spawnQ = []; S.claimQ = []; return; }
   S.phase = 'night'; S.phaseT = 0;
-  S.spawnQ = q; S.spawnGap = Math.min(1.0, 16 / q.length); S.spawnT = 0.5;
+  S.spawnQ = q; S.spawnGap = q.length ? Math.min(1.0, 16 / q.length) : 1; S.spawnT = 0.5;
+  S.claimQ = claimQ; S.claimGap = claimQ.length ? Math.min(1.0, 16 / claimQ.length) : 1; S.claimT = 0.35;
   if (hasCurse('wasp') && S.nights < (TUNE.curseWaspNights || 3)) S.spawnGap /= (TUNE.curseWaspSpawn || 1.25);
   S.spawnIndex = 0; S.returnQ = [];
   snapshotNightBuildings();
@@ -2704,6 +2781,10 @@ function startNight() {
   S.waveSrc = waveEntryPoint(S.waveSide);
   if (necroNight) toast(`Night ${S.nights + 1} — the Necromancer leads a Blood Moon!`, 'bad');
   else toast(`Night ${S.nights + 1} — the Pale Host marches!`, 'bad');
+  if (claimQ.length) {
+    const names = contested().map(r => r.name).join(', ');
+    toast(`The Pale Host counters at ${names}!`, 'bad');
+  }
 }
 function pickWaveSide() {
   const r = rand();
@@ -2716,7 +2797,7 @@ function waveEntryPoint(side) {
   const fr = (S.focus != null && S.regions[S.focus]) || S.regions[0];
   const use = side === 'both' ? (rand() < 0.5 ? 'left' : 'right') : (side || 'left');
   const sign = use === 'left' ? -1 : 1;
-  const pool = S.regions.filter(r => r.owner !== 'player' && (use === 'left' ? r.x < fr.x : r.x >= fr.x))
+  const pool = S.regions.filter(r => r.owner !== 'player' && r.owner !== 'contested' && (use === 'left' ? r.x < fr.x : r.x >= fr.x))
     .sort((a, b) => dist(a, fr) - dist(b, fr));
   if (pool.length && dist(pool[0], fr) < 900) return { x: pool[0].x, y: pool[0].y, side: use };
   const off = 360 + rand() * 80;
@@ -2724,20 +2805,21 @@ function waveEntryPoint(side) {
 }
 function pickFocus() {
   const o = owned().filter(r => r.core); if (!o.length) { S.focus = null; return; }
-  const foes = S.regions.filter(r => r.owner !== 'player');
+  const foes = S.regions.filter(r => r.owner !== 'player' && r.owner !== 'contested');
   const exposure = r => foes.length ? Math.min(...foes.map(f => dist(f, r))) : 0;
   const score = r => r.core.hp + 0.25 * exposure(r) + (r.id === 0 ? 60 : 0);
   o.sort((a, b) => score(a) - score(b)); S.focus = o[0].id;
 }
 function startDay() {
   if (isChallenge()) recordNightScore();
-  S.phase = 'day'; S.phaseT = DAY; S.nights++; S.day++; S.spawnQ = []; S.nightSpawned = false;
+  S.phase = 'day'; S.phaseT = DAY; S.nights++; S.day++; S.spawnQ = []; S.claimQ = []; S.nightSpawned = false;
   for (const u of S.undead) S.fx.push({ k: 'puff', x: u.x, y: u.y, t: 0.6, t0: 0.6 });
   S.undead = []; S.leader = null; S.chaos = false; S.returnQ = [];
   const heal = 40 + (hasBless('rest') ? (TUNE.blessDawnHeal || 80) : 0);
   S.monarch.hp = Math.min(S.monarch.max, S.monarch.hp + heal);
   S.bloodMoon = false;
   toast(`Dawn! Night ${S.nights} survived — the dead crumble`, 'good');
+  resolveClaims();
   if (S.day % 10 === 9) toast('The Necromancer comes tomorrow night', 'bad');
   if (isChallenge()) {
     noteUnlock(S.nights);
@@ -2751,17 +2833,27 @@ function raiseDead(n) {
   S.undead.push(u); S.stats.spawned++; S.stats.raised++; S.nightSpawned = true;
   S.fx.push({ k: 'puff', x: u.x, y: u.y, t: 0.5, t0: 0.5 });
 }
-function spawnUndead(kind, at, returned) {
-  const src = at || (hasCurse('chaos') ? chaosSpawnPoint() : waveEntryPoint(S.waveSide || pickWaveSide()));
+function claimEntryPoint(r) {
+  if (!r) return waveEntryPoint(S.waveSide || pickWaveSide());
+  const home = S.regions[0] || r;
+  const ang = Math.atan2(r.y - home.y, r.x - home.x) || 0;
+  const d = 90 + rand() * 50;
+  return { x: clamp(r.x + Math.cos(ang) * d, 40, W - 40), y: clamp(r.y + Math.sin(ang) * d, 40, H - 40), side: 'claim' };
+}
+function spawnUndead(kind, at, returned, opts) {
+  opts = opts || {};
+  const src = at || (opts.claim != null && S.regions[opts.claim] ? claimEntryPoint(S.regions[opts.claim])
+    : (hasCurse('chaos') ? chaosSpawnPoint() : waveEntryPoint(S.waveSide || pickWaveSide())));
   const idx = returned ? null : (S.spawnIndex++);
-  const m = enemyMods(kind, idx);
-  const jitter = at ? 8 : 120;
+  const m = enemyMods(kind, idx, { claimScale: opts.scale || 1 });
+  const jitter = at ? 8 : (opts.claim != null ? 70 : 120);
   const u = { type: 'undead', kind, x: clamp(src.x + (rand() - .5) * jitter, 10, W - 10), y: clamp(src.y + (rand() - .5) * jitter, 10, H - 10),
     r: m.r, hp: m.hp, max: m.hp, speed: m.speed * (0.9 + rand() * 0.2), dmg: m.dmg, coin: m.coin, elite: m.elite,
     rangeMul: m.rangeMul || 1, cdMul: m.cdMul || 1,
     cd: hasCurse('chaos') && !returned ? (TUNE.curseChaosDelay || 3) : 0,
     atkWait: hasCurse('chaos') && !returned ? (TUNE.curseChaosDelay || 3) : 0,
-    tgt: null, rt: 0, jit: (rand() - .5), returned: !!returned };
+    tgt: null, rt: 0, jit: (rand() - .5), returned: !!returned,
+    claim: opts.claim, claimScale: opts.scale || 1 };
   S.undead.push(u); S.stats.spawned++; S.nightSpawned = true;
   S.lastSpawnAt = S.t;
   if (kind === 'necro') { S.leader = u; toast('A Necromancer leads this wave!', 'bad'); }
@@ -2784,7 +2876,7 @@ function damage(e, dmg) {
     S.fx.push({ k: 'puff', x: e.x, y: e.y, t: 0.5, t0: 0.5 });
     S.fx.push({ k: 'coins', x: e.x, y: e.y - 4, t: 0.8, t0: 0.8, n: coin });
     if (hasCurse('afterlife') && e.kind !== 'necro' && !e.returned && S.phase === 'night') {
-      (S.returnQ || (S.returnQ = [])).push({ kind: e.kind, x: e.x, y: e.y, t: TUNE.curseAfterlifeDelay || 4 });
+      (S.returnQ || (S.returnQ = [])).push({ kind: e.kind, x: e.x, y: e.y, t: TUNE.curseAfterlifeDelay || 4, claim: e.claim, scale: e.claimScale });
     }
     if (e.kind === 'necro') {
       S.chaos = true; S.leader = null;
@@ -2798,9 +2890,11 @@ function damage(e, dmg) {
     S.guardians.splice(S.guardians.indexOf(e), 1); S.coins += e.kind === 'warden' ? 25 : 15;
     S.fx.push({ k: 'puff', x: e.x, y: e.y, t: 0.8, t0: 0.8, big: 1 });
     S.fx.push({ k: 'coins', x: e.x, y: e.y - 6, t: 0.85, t0: 0.85, n: e.kind === 'warden' ? 25 : 15 });
-    if (e.kind === 'guardian') captureRegion(S.regions[e.region]); else retakeRegion(S.regions[e.region]);
+    requestPlantBanner(e.region);
   } else if (e.type === 'core') {
-    loseRegion(S.regions[e.region]);
+    const rr = S.regions[e.region];
+    if (rr && rr.owner === 'contested') failClaim(rr);
+    else loseRegion(rr);
   } else if (BLD[e.type] && S.buildings.includes(e)) {
     if (hasCurse('destruction') && e.owner === 'player' && (e.built || 0) >= 1) {
       (S.rubble || (S.rubble = [])).push({ x: e.x, y: e.y, type: e.type, region: e.region, unlockDay: S.day + (TUNE.curseDestroyWait || 2), r: e.r || 16 });
@@ -2827,6 +2921,93 @@ function damage(e, dmg) {
     gameOver('The Monarch has fallen');
   }
   if (S.monarch.target === e) S.monarch.target = null;
+}
+
+function requestPlantBanner(zoneId) {
+  if (!S || S.over) return { ok: false, reason: 'No game' };
+  const r = S.regions[zoneId];
+  if (!r) return { ok: false, reason: 'No zone' };
+  if (r.owner === 'player') return { ok: false, reason: 'Already yours' };
+  if (r.owner === 'contested' && r.core && r.core.hp > 0) return { ok: false, reason: 'A banner already stands' };
+  if (S.guardians.some(g => g.region === r.id && g.hp > 0)) {
+    toast('A guardian still holds this land', 'bad');
+    return { ok: false, reason: 'Guardian still stands' };
+  }
+  const range = TUNE.bannerPlantRange || 220;
+  const here = regionIdAt(S.monarch.x, S.monarch.y);
+  if (here !== r.id && dist(S.monarch, r) > range) {
+    toast('Move closer to plant a banner', 'bad');
+    return { ok: false, reason: 'Too far' };
+  }
+  const from = r.owner === 'pale' ? 'pale' : 'wild';
+  r.claimFrom = from;
+  r.owner = 'contested';
+  const hp = Math.round((TUNE.bannerHp || 200) * allyHpMul());
+  r.core = mkCore(r, hp);
+  r.core.contested = true;
+  r.core.r = TUNE.bannerR || 18;
+  S.mapDirty = true; markNavDirty();
+  S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05 });
+  const attempt = (r.claimFails || 0) + 1;
+  const pct = Math.round((claimScaleOf(r) - 1) * 100);
+  toast(pct
+    ? `Banner planted in ${r.name} — contested! Hold it through the night. Attempt ${attempt} (+${pct}% host).`
+    : `Banner planted in ${r.name} — contested! Hold it through the night to capture.`, 'good');
+  refreshCamps();
+  if (PUI.inspectId && String(PUI.inspectId).slice(0, 5) === 'site-' && +String(PUI.inspectId).slice(5) === r.id) {
+    openInspect(r.core);
+  }
+  return { ok: true, region: r.id, attempt };
+}
+function failClaim(r) {
+  if (!r || r.owner !== 'contested') return;
+  r.claimFails = (r.claimFails || 0) + 1;
+  const from = r.claimFrom || 'wild';
+  r.owner = from;
+  r.core = null;
+  r.claimFrom = null;
+  S.mapDirty = true; markNavDirty();
+  S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05, bad: 1 });
+  const pct = Math.round((claimScaleOf(r) - 1) * 100);
+  toast(`${r.name} banner fell! The zone stays ${from === 'pale' ? 'Pale' : 'wild'}. Next attempt: +${pct}% host and +${pct}% strength.`, 'bad');
+  refreshCamps();
+  closeInspect();
+}
+function completeClaim(r) {
+  if (!r || r.owner !== 'contested' || !r.core || r.core.hp <= 0) return false;
+  const from = r.claimFrom || 'wild';
+  const banner = r.core;
+  banner.contested = false;
+  r.owner = 'player';
+  r.claimFrom = null;
+  S.mapDirty = true; markNavDirty();
+  S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05 });
+  if (from === 'pale') {
+    banner.max = Math.max(banner.max, TUNE.coreRetaken);
+    banner.hp = Math.min(banner.max, Math.max(banner.hp, 1));
+    r.weakened = false;
+    S.stats.retakes++;
+    let n = 0;
+    for (const b of S.buildings) if (b.region === r.id && b.owner === 'pale') { b.owner = 'player'; b.hp = Math.ceil(b.max * 0.6); n++; }
+    toast(`${r.name} held through the night — retaken! ${n} building${n === 1 ? '' : 's'} returned (damaged)`, 'good');
+  } else {
+    banner.max = Math.max(banner.max, TUNE.coreCaptured);
+    banner.hp = Math.min(banner.max, Math.max(banner.hp, 1));
+    S.stats.captures++;
+    let extra = '';
+    if (r.bonus === 'fort') { S.buildings.push(mkBld('fort', r.x + 60, r.y + 10, r.id, 1)); extra = ' +free Encampment Fort'; }
+    if (r.bonus === 'keep') { banner.keep = true; banner.level = 1; banner.max = banner.hp = TUNE.coreKeep; banner.r = TUNE.keepR[0]; extra = ' +free Ruin Keep'; }
+    r.bonus = null;
+    toast(`Banner held! ${r.name} is yours.${extra}`, 'good');
+  }
+  refreshCamps();
+  return true;
+}
+function resolveClaims() {
+  for (const r of S.regions.slice()) {
+    if (r.owner === 'contested' && r.core && r.core.hp > 0) completeClaim(r);
+    else if (r.owner === 'contested') failClaim(r);
+  }
 }
 
 function captureRegion(r) {
@@ -2993,8 +3174,16 @@ function update(dt) {
   } else if (S.phase === 'night') {
     // Dawn only when the wave has actually started (or was empty — startNight never enters)
     // and every queued and living host, including necro-raised skeletons, is gone.
-    if (S.nightSpawned && !S.spawnQ.length && !S.undead.length) startDay();
+    if (S.nightSpawned && !S.spawnQ.length && !(S.claimQ && S.claimQ.length) && !S.undead.length) startDay();
     if (S.spawnQ.length) { S.spawnT -= dt; if (S.spawnT <= 0) { S.spawnT = S.spawnGap; spawnUndead(S.spawnQ.shift()); } }
+    if (S.claimQ && S.claimQ.length) {
+      S.claimT -= dt;
+      if (S.claimT <= 0) {
+        S.claimT = S.claimGap;
+        const item = S.claimQ.shift();
+        spawnUndead(item.kind, null, false, { claim: item.claim, scale: item.scale });
+      }
+    }
   }
   if (S.dropHold) { S.dropT -= dt; if (S.dropT <= 0) { S.dropT = 0.22; dropCoin(); } }
   const m = S.monarch;
@@ -3146,7 +3335,7 @@ function update(dt) {
       r.t -= dt;
       if (r.t <= 0) {
         S.returnQ.splice(S.returnQ.indexOf(r), 1);
-        const u = spawnUndead(r.kind, { x: r.x, y: r.y }, true);
+        const u = spawnUndead(r.kind, { x: r.x, y: r.y }, true, { claim: r.claim, scale: r.scale });
         if (u) S.fx.push({ k: 'puff', x: u.x, y: u.y, t: 0.5, t0: 0.5 });
       }
     }
@@ -3203,6 +3392,10 @@ function update(dt) {
 }
 
 function pickUndeadTarget(u, playerBlds) {
+  if (u.claim != null) {
+    const cr = S.regions[u.claim];
+    if (cr && cr.core && cr.core.hp > 0) return cr.core;
+  }
   const m = S.monarch;
   if (dist(u, m) < 150) return m;
   for (const a of S.archers) if (dist(u, a) < 70) return a;
@@ -5227,6 +5420,24 @@ function buildArt() {
   Art.flameG = paintRadial(18, 22, [[0, 'rgba(236,255,220,.95)'], [0.35, 'rgba(150,230,90,.9)'], [1, 'rgba(80,160,50,0)']]);
   Art.orb = paintRadial(24, 24, [[0, 'rgba(230,255,210,1)'], [0.35, 'rgba(140,255,90,.85)'], [1, 'rgba(80,180,40,0)']]);
   Art.fog = paintRadial(128, 80, [[0, 'rgba(196,204,186,.55)'], [0.5, 'rgba(170,180,160,.22)'], [1, 'rgba(170,180,160,0)']]);
+  function paintBanner(flagCol, ghost) {
+    return bake(40, 64, g => {
+      ell(g, 20, 58, 12, 5, '#cbb892');
+      ell(g, 18, 57, 8, 3.4, '#e6d3a8');
+      g.fillStyle = '#5c4030';
+      g.fillRect(18.7, 16, 2.6, 42);
+      g.globalAlpha = ghost ? 0.4 : 1;
+      g.fillStyle = flagCol;
+      g.beginPath();
+      g.moveTo(21.3, 18); g.lineTo(37, 24); g.lineTo(21.3, 30);
+      g.closePath(); g.fill();
+      g.globalAlpha = 1;
+      disc(g, 20, 16, 2.2, '#f0c14a');
+    });
+  }
+  Art.banner = paintBanner('#3e74c8', false);
+  Art.bannerContest = paintBanner('#e8a83a', false);
+  Art.bannerSite = paintBanner('#c9b488', true);
   Art.smoke = paintRadial(20, 20, [[0, 'rgba(255,255,255,.35)'], [1, 'rgba(255,255,255,0)']]);
   Art.glow = paintRadial(64, 64, [[0, 'rgba(255,186,90,.95)'], [0.45, 'rgba(255,140,50,.28)'], [1, 'rgba(255,120,40,0)']]);
   Art.glowG = paintRadial(64, 64, [[0, 'rgba(170,255,120,.8)'], [0.5, 'rgba(80,180,70,.2)'], [1, 'rgba(80,180,70,0)']]);
@@ -5886,9 +6097,18 @@ function drawCore(k) {
     ctx.fillRect(x + 9, y - 6, 8, 1.3);
     ctx.fillStyle = '#5c4030';
     ctx.fillRect(x - 1.3, y - 40, 2.6, 40);
-    drawFlag(x + 1.3, y - 38, 16, 10, Math.sin(S.t * 3.4 + y), '#3e74c8', false);
+    const flagCol = k.contested ? '#e8a83a' : '#3e74c8';
+    drawFlag(x + 1.3, y - 38, 16, 10, Math.sin(S.t * 3.4 + y), flagCol, false);
     disc(ctx, x, y - 40, 2.1, '#f0c14a');
     flameAt(x - 10, y - 4, false, x);
+    if (k.contested) {
+      ctx.save();
+      ctx.globalAlpha = 0.45 + Math.sin(S.t * 3.2) * 0.2;
+      ctx.strokeStyle = '#f0c14a';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(x, y + 2, 22 + Math.sin(S.t * 2.4) * 3, 9, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
   }
   flashAt(x, y - 16, 12, 16, k.flash);
   bar(x, y + 12, 48, k.hp / k.max, '#5b93e0');
@@ -6004,6 +6224,27 @@ function drawWallGhosts() {
   }
 }
 
+function drawBannerSite(site) {
+  const x = site.x, y = site.y;
+  const pulse = 0.55 + Math.sin(S.t * 2.8) * 0.2;
+  ctx.save();
+  ctx.globalAlpha = pulse;
+  ctx.strokeStyle = '#f0c14a';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([6, 5]);
+  ctx.beginPath(); ctx.ellipse(x, y + 2, 26, 11, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+  ell(ctx, x, y + 1, 12, 5, '#cbb892');
+  ell(ctx, x - 2, y, 8, 3.4, '#e6d3a8');
+  ctx.fillStyle = '#5c4030';
+  ctx.fillRect(x - 1.3, y - 36, 2.6, 36);
+  ctx.globalAlpha = 0.35 + Math.sin(S.t * 2.2) * 0.1;
+  drawFlag(x + 1.3, y - 34, 14, 8, Math.sin(S.t * 2.2 + y), '#c9b488', false);
+  ctx.globalAlpha = 1;
+  disc(ctx, x, y - 36, 2.1, '#f0c14a');
+  placeTag('Plant a banner', x, y + 22, 12, '#fff6e4', '#e6c27a', 'site');
+}
 function drawMine(m) {
   if (!m) return;
   const working = !!minerAtMine(m);
@@ -6347,7 +6588,7 @@ function gatherLights() {
   lightList.length = 0;
   lightList.push({ x: S.monarch.x, y: S.monarch.y, r: 168, pale: false });
   for (const r of S.regions) {
-    if (r.core && r.owner === 'player') lightList.push({ x: r.core.x, y: r.core.y - 8, r: r.core.keep ? 128 : 108, pale: false });
+    if (r.core && (r.owner === 'player' || r.owner === 'contested')) lightList.push({ x: r.core.x, y: r.core.y - 8, r: r.core.keep ? 128 : 108, pale: false });
     else if (r.owner === 'pale') lightList.push({ x: r.x, y: r.y, r: 90, pale: true });
   }
   for (const b of S.buildings) if (b.built >= 1 && b.type !== 'wall' && b.type !== 'farm') lightList.push({ x: b.x, y: b.y - 12, r: b.type === 'fort' ? 118 : 92, pale: b.owner === 'pale' });
@@ -6484,6 +6725,13 @@ function render() {
     ctx.drawImage(Art.fog.c, r.x - 50 - ox * 0.6, r.y + 16, 230, 140);
     ctx.globalAlpha = 1;
   }
+  for (const r of S.regions) if (r.owner === 'contested' && vis(r.x, r.y)) {
+    ctx.save();
+    ctx.globalAlpha = 0.22 + Math.sin(S.t * 2.1 + r.id) * 0.06;
+    ctx.fillStyle = '#f0c14a';
+    ctx.beginPath(); ctx.ellipse(r.x, r.y + 6, 120, 78, r.id * 0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
 
   pileN = 0;
   for (const t of S.trees) if (vis(t.x, t.y)) pushP(t.y, 'tree', t);
@@ -6491,6 +6739,7 @@ function render() {
   for (const b of S.buildings) if (vis(b.x, b.y) && !b.tool) pushP(b.type === 'farm' && b.built >= 1 ? b.y - 30 : b.y, 'bld', b);
   for (const st of S.stands) if (vis(st.x, st.y)) pushP(st.y, 'stand', st);
   for (const r of S.regions) if (r.core && vis(r.x, r.y)) pushP(r.core.y, 'core', r.core);
+  for (const r of S.regions) if (isClaimable(r) && vis(r.x, r.y)) pushP(r.y + 0.2, 'site', bannerSiteOf(r));
   for (const g of S.guardians) if (vis(g.x, g.y)) pushP(g.y, 'guard', g);
   for (const a of S.archers) if (vis(a.x, a.y)) pushP(a.y, 'arch', a);
   for (const f of S.folk) if (vis(f.x, f.y)) pushP(f.y, 'folk', f);
@@ -6511,6 +6760,7 @@ function render() {
       else if (it.k === 'rock') drawRock(it.a);
       else if (it.k === 'bld') drawBuilding(it.a);
       else if (it.k === 'core') drawCore(it.a);
+      else if (it.k === 'site') drawBannerSite(it.a);
       else if (it.k === 'guard') drawGuardian(it.a);
       else if (it.k === 'arch') drawArcher(it.a);
       else if (it.k === 'und') drawUndead(it.a);
@@ -6527,10 +6777,12 @@ function render() {
   }
 
   for (const r of S.regions) if (vis(r.x, r.y)) {
-    const st = r.owner === 'player' ? 'YOURS' : r.owner === 'pale' ? 'PALE HOST' : (r.bonus === 'fort' ? 'WILD · fort' : r.bonus === 'keep' ? 'WILD · keep' : 'WILD');
+    const st = r.owner === 'player' ? 'YOURS' : r.owner === 'contested' ? 'CONTESTED' : r.owner === 'pale' ? 'PALE HOST' : (r.bonus === 'fort' ? 'WILD · fort' : r.bonus === 'keep' ? 'WILD · keep' : 'WILD');
     const lift = r.core && r.core.keep ? 108 : 86;
     placeTag(r.name, r.x, r.y - lift, 18, '#fff8ee', null, 'name');
-    placeTag(st, r.x, r.y - lift + 24, 12, r.owner === 'player' ? '#d6e6ff' : r.owner === 'pale' ? '#d7f0cc' : '#ffe6b0', r.owner === 'player' ? '#7eb0ee' : r.owner === 'pale' ? '#9ddea8' : '#e6c27a', 'status');
+    const stCol = r.owner === 'player' ? '#d6e6ff' : r.owner === 'contested' ? '#ffe6b0' : r.owner === 'pale' ? '#d7f0cc' : '#ffe6b0';
+    const stRim = r.owner === 'player' ? '#7eb0ee' : r.owner === 'contested' ? '#e8a83a' : r.owner === 'pale' ? '#9ddea8' : '#e6c27a';
+    placeTag(st, r.x, r.y - lift + 24, 12, stCol, stRim, 'status');
   }
   for (const g of S.guardians) {
     if (!vis(g.x, g.y) || !edgeOf(g.x, g.y).on) continue;
@@ -6658,7 +6910,7 @@ function drawHud() {
     const t = Math.max(0, Math.ceil(S.phaseT)), mm = (t / 60) | 0, ss = String(t % 60).padStart(2, '0');
     setVal('hPhase', 'p', 'Day ' + mm + ':' + ss);
   } else {
-    const left = (S.undead ? S.undead.length : 0) + (S.spawnQ ? S.spawnQ.length : 0);
+    const left = (S.undead ? S.undead.length : 0) + (S.spawnQ ? S.spawnQ.length : 0) + (S.claimQ ? S.claimQ.length : 0);
     setVal('hPhase', 'p', (S.bloodMoon ? 'Blood Moon · ' : 'Night · ') + left);
   }
   $('hPhase').classList.toggle('night', S.phase === 'night');
@@ -6731,6 +6983,15 @@ window.__bc = {
   teleport(x, y) { S.monarch.x = x; S.monarch.y = y; lookX = x; lookY = y; },
   coins(n) { S.coins += n; }, heal() { S.monarch.hp = S.monarch.max; },
   forceLose(id) { const r = S.regions[id]; if (r && r.core) damage(r.core, r.core.hp + 1); },
+  requestPlantBanner, failClaim, completeClaim, resolveClaims, claimScaleOf, isClaimable, contested, heldCores,
+  claimWaveSize(id) {
+    const r = S.regions[id]; if (!r) return 0;
+    const n0 = TUNE.waveBase + TUNE.wavePerNight * S.nights + TUNE.wavePerRegion * Math.max(0, owned().length - 1);
+    const necroNight = S.day > 0 && S.day % 10 === 0;
+    let n = Math.max(0, Math.round(n0 * (necroNight ? (TUNE.necroWaveMul || 2) : 1)));
+    if (hasCurse('wasp') && S.nights < (TUNE.curseWaspNights || 3)) n = Math.round(n * (TUNE.curseWaspCount || 2));
+    return Math.max(1, Math.round(n * (TUNE.claimWaveMul || 2) * claimScaleOf(r)));
+  },
   guardianOf(id) { return S.guardians.find(g => g.region === id); },
   findClear(type, cx, cy) {
     for (let rad = 70; rad <= 260; rad += 28) {
@@ -6752,7 +7013,7 @@ window.__bc = {
   keepLevel, isPlayerKeep, houseSlotsOf, farmCoinsOf, upgradeCostTo, materialReady, mineOwned,
   upgradeNeed, wallConnected, upgradeMembers, beginUpgrade, payUpgrade, cancelUpgrade,
   tryUpgradeTap, upgradeTargetAt, nearestPayableUpgrade, finishUpgrade, applyTier, spriteIdFor, getSprite,
-  buildingAt, buildingById, openInspect, closeInspect, requestUpgrade, requestStock, requestSwapGate, inspectTarget,
+  buildingAt, buildingById, openInspect, closeInspect, requestUpgrade, requestStock, requestSwapGate, requestPlantBanner, inspectTarget,
   get inspectId() { return PUI.inspectId; },
   get mines() { return S && S.mines; },
   get choiceBtns() { return S && S._choiceBtns; },
