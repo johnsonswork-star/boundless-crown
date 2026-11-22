@@ -1830,11 +1830,12 @@ function paintInspectPortrait(b) {
   g.fillRect(0, 0, w, h);
   const spr = inspectSprite(b);
   if (!spr || !spr.c) return;
-  const sc = Math.min((w - 20) / spr.w, (h - 18) / spr.h);
+  const gy = spr.gy != null ? spr.gy : spr.h;
+  const sc = Math.min((w - 20) / spr.w, (h - 16) / spr.h);
   g.save();
-  g.translate(w / 2, h - 10);
+  g.translate(w / 2, h - 8);
   g.scale(sc, sc);
-  g.drawImage(spr.c, -spr.w / 2, -spr.h);
+  g.drawImage(spr.c, -spr.w / 2, -gy, spr.w, spr.h);
   g.restore();
 }
 function inspectActionSig(b) {
