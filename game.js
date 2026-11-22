@@ -4495,21 +4495,161 @@ function tag(txt, x, y, size, col, accent) {
   ctx.fillText(txt, x, y + 0.5);
 }
 const TOP_CHROME = 104, BOT_CHROME = 116;
-function placeTag(txt, wx, wy, size, col, accent) {
+function beginLabels() {
+  if (!S) return;
+  S._labelQ = [];
+  S._choiceBtns = [];
+  S._upgradeBadges = [];
+  S._visibleLabels = [];
+}
+function labelHit(a, b, pad) {
+  const p = pad || 0;
+  return a.x < b.x + b.w + p && a.x + a.w + p > b.x && a.y < b.y + b.h + p && a.y + a.h + p > b.y;
+}
+function measureWorldTag(txt, size) {
+  const fs = size * scale, padX = 7 * scale, h = (size + 7) * scale;
+  ctx.font = `800 ${fs}px "Segoe UI", system-ui, sans-serif`;
+  return { w: ctx.measureText(txt).width + padX * 2, h, fs, padX };
+}
+function queueLabel(lab) {
+  if (!S || !S._labelQ) return;
+  S._labelQ.push(lab);
+}
+function queueWorldTag(txt, wx, wy, size, col, accent, kind) {
+  if (!S) return;
+  const p = w2s(wx, wy);
+  const m = measureWorldTag(txt, size);
+  const x = p.x - m.w / 2, y = p.y - m.h / 2;
+  if (y + m.h < TOP_CHROME || y > vh - BOT_CHROME) return;
+  queueLabel({ kind: kind || 'tag', txt, x, y, w: m.w, h: m.h, fs: m.fs, padX: m.padX, col, accent });
+}
+function placeTag(txt, wx, wy, size, col, accent, kind) {
   const sh = (size + 8) * scale;
   const p = w2s(wx, wy);
   if (p.y - sh / 2 < TOP_CHROME || p.y + sh / 2 > vh - BOT_CHROME) return;
-  tag(txt, wx, wy, size, col, accent);
+  queueWorldTag(txt, wx, wy, size, col, accent, kind);
 }
-function placeTagClamped(txt, wx, wy, size, col, accent) {
-  ctx.font = `800 ${size}px "Segoe UI", system-ui, sans-serif`;
-  const sh = (size + 8) * scale;
-  const tw = (ctx.measureText(txt).width + 16) * scale;
+function placeTagClamped(txt, wx, wy, size, col, accent, kind) {
+  const m = measureWorldTag(txt, size);
   const p = w2s(wx, wy);
-  p.x = clamp(p.x, tw / 2 + 8, vw - tw / 2 - 8);
-  p.y = clamp(p.y, TOP_CHROME + sh / 2 + 2, vh - BOT_CHROME - sh / 2 - 2);
-  const w = s2w(p.x, p.y);
-  tag(txt, w.x, w.y, size, col, accent);
+  p.x = clamp(p.x, m.w / 2 + 8, vw - m.w / 2 - 8);
+  p.y = clamp(p.y, TOP_CHROME + m.h / 2 + 2, vh - BOT_CHROME - m.h / 2 - 2);
+  queueLabel({ kind: kind || 'tag', txt, x: p.x - m.w / 2, y: p.y - m.h / 2, w: m.w, h: m.h, fs: m.fs, padX: m.padX, col, accent });
+}
+function paintQueuedTag(lab) {
+  ctx.font = `800 ${lab.fs}px "Segoe UI", system-ui, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  rrPath(ctx, lab.x, lab.y, lab.w, lab.h, Math.max(5, Math.min(8, (lab.padX || 7))));
+  ctx.fillStyle = 'rgba(28,20,14,.74)';
+  ctx.fill();
+  if (lab.accent) {
+    ctx.lineWidth = Math.max(1.5, (lab.fs || 12) * 0.12);
+    ctx.strokeStyle = lab.accent;
+    ctx.stroke();
+  }
+  ctx.fillStyle = lab.col;
+  ctx.fillText(lab.txt, lab.x + lab.w / 2, lab.y + lab.h / 2 + 0.5);
+}
+function paintQueuedBadge(lab) {
+  const pad = 7, ih = 16, h = lab.h, x = lab.x, y = lab.y, w = lab.w;
+  const lockSpr = lab.locked ? getSprite('icon-lock') : null;
+  rrPath(ctx, x, y, w, h, 8);
+  ctx.fillStyle = 'rgba(28,20,14,.88)';
+  ctx.fill();
+  ctx.lineWidth = 2.2;
+  ctx.strokeStyle = lab.locked ? '#e6c27a' : ((lab.paid || 0) >= (lab.cost || 0) ? '#8ee0b0' : '#f0c14a');
+  ctx.stroke();
+  if (lab.locked && lockSpr && lockSpr.c) ctx.drawImage(lockSpr.c, x + pad, y + (h - ih) / 2, ih, ih);
+  else if (!lab.locked && Art.coin) ctx.drawImage(Art.coin.c, x + pad, y + (h - ih) / 2, ih, ih);
+  ctx.font = `800 ${lab.locked ? 13 : 16}px "Segoe UI", system-ui, sans-serif`;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = lab.locked ? '#ffe6b0' : ((lab.paid || 0) >= (lab.cost || 0) ? '#e9fff2' : '#fff6e4');
+  const iconW = lab.locked || Art.coin ? ih : 0;
+  ctx.fillText(lab.txt, x + pad + iconW + (iconW ? 5 : 0), y + h / 2 + 0.5);
+}
+function paintQueuedChoice(lab) {
+  const x = lab.x, y = lab.y, bw = lab.w, bh = lab.h;
+  rrPath(ctx, x, y, bw, bh, 12);
+  ctx.fillStyle = 'rgba(28,20,14,.96)';
+  ctx.fill();
+  ctx.lineWidth = 2.6;
+  ctx.strokeStyle = lab.locked ? '#c9b488' : '#f0c14a';
+  ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '800 18px "Segoe UI", system-ui, sans-serif';
+  ctx.fillStyle = '#fff6e4';
+  ctx.fillText(lab.label, x + bw / 2, y + 22);
+  ctx.font = '700 11px "Segoe UI", system-ui, sans-serif';
+  ctx.fillStyle = '#e6c27a';
+  ctx.fillText(lab.sub, x + bw / 2, y + 40);
+  if (lab.locked) {
+    const lockSpr = getSprite('icon-lock');
+    if (lockSpr && lockSpr.c) ctx.drawImage(lockSpr.c, x + bw - 22, y + 6, 16, 18);
+  }
+}
+function clampLabel(lab) {
+  lab.x = Math.round(clamp(lab.x, 6, vw - lab.w - 6));
+  lab.y = Math.round(clamp(lab.y, TOP_CHROME + 2, vh - BOT_CHROME - lab.h - 2));
+}
+function flushLabels() {
+  if (!S) return;
+  const all = S._labelQ || [];
+  const choices = all.filter(l => l.kind === 'choice');
+  const others = all.filter(l => l.kind !== 'choice');
+  const padChoice = 14;
+  if (choices.length) {
+    for (const lab of others) {
+      if (lab.keepWithChoice) continue;
+      if (choices.some(c => labelHit(lab, c, padChoice))) lab.hide = true;
+    }
+  }
+  const placed = choices.map(c => ({ x: c.x, y: c.y, w: c.w, h: c.h }));
+  const gap = 4;
+  for (const lab of others) {
+    if (lab.hide) continue;
+    clampLabel(lab);
+    const ox = lab.x, oy = lab.y;
+    let found = false;
+    for (let i = 0; i <= 10 && !found; i++) {
+      const tries = i === 0 ? [{ x: ox, y: oy }] : [
+        { x: ox, y: oy - i * (lab.h + gap) },
+        { x: ox, y: oy + i * (lab.h + gap) },
+        { x: ox + i * 18, y: oy },
+        { x: ox - i * 18, y: oy },
+      ];
+      for (const tr of tries) {
+        lab.x = tr.x; lab.y = tr.y;
+        clampLabel(lab);
+        if (choices.length && !lab.keepWithChoice && choices.some(c => labelHit(lab, c, padChoice))) continue;
+        if (!placed.some(p => labelHit(lab, p, gap))) { found = true; break; }
+      }
+    }
+    if (!found) {
+      lab.x = ox; lab.y = oy;
+      clampLabel(lab);
+      if (choices.length && choices.some(c => labelHit(lab, c, padChoice))) lab.hide = true;
+    }
+    if (!lab.hide) placed.push({ x: lab.x, y: lab.y, w: lab.w, h: lab.h });
+  }
+  S._visibleLabels = [];
+  S._upgradeBadges = [];
+  S._choiceBtns = [];
+  for (const lab of others) {
+    if (lab.hide) continue;
+    if (lab.kind === 'badge') {
+      paintQueuedBadge(lab);
+      if (lab.lead) S._upgradeBadges.push({ x: lab.x, y: lab.y, w: lab.w, h: lab.h, lead: lab.lead });
+    } else {
+      paintQueuedTag(lab);
+    }
+    S._visibleLabels.push({ x: lab.x, y: lab.y, w: lab.w, h: lab.h, kind: lab.kind || 'tag', txt: lab.txt || '' });
+  }
+  for (const lab of choices) {
+    paintQueuedChoice(lab);
+    S._choiceBtns.push({ x: lab.x, y: lab.y, w: lab.w, h: lab.h, b: lab.b, path: lab.path, locked: !!lab.locked, reason: lab.reason || '' });
+    S._visibleLabels.push({ x: lab.x, y: lab.y, w: lab.w, h: lab.h, kind: 'choice', txt: lab.label || lab.path || '' });
+  }
 }
 function nameTag(txt, x, y, size, col, accent) {
   const m = S.monarch;
@@ -4643,7 +4783,7 @@ function drawScaffold(b) {
   const busy = S.folk.some(f => f.role === 'builder' && f.job === b && f.working);
   if (!busy && !b.demo) blit(Art.orderMark, b.x - 14 * sc, b.y + 2, { sc: 0.9 });
   bar(b.x, b.y + 10, 40, b.built, '#8fd06a');
-  if (!S.folk.some(f => f.role === 'builder')) placeTag('Needs a Builder', b.x, b.y + 26, 11, '#ffe6b0', '#e6c27a');
+  if (!S.folk.some(f => f.role === 'builder')) placeTag('Needs a Builder', b.x, b.y + 26, 11, '#ffe6b0', '#e6c27a', 'need');
   if (b.demo) drawDemoMark(b);
 }
 function drawDemoMark(b) {
@@ -4674,7 +4814,7 @@ function drawBuilding(b) {
     blit(spr, b.x, b.y + 6);
     if (b.hp < b.max) bar(b.x, b.y + 12, 36, b.hp / b.max, pale ? '#7dce6a' : '#e2a23a');
     if (b.upgGroup && b.upgGroup.prog > 0) bar(b.x, b.y + 20, 36, b.upgGroup.prog, '#8fd06a');
-    if (!pale && !(b.farmer && S.folk.includes(b.farmer))) placeTag('Needs a Farmer', b.x, b.y + 22, 11, '#ffe6b0', '#e6c27a');
+    if (!pale && !(b.farmer && S.folk.includes(b.farmer))) placeTag('Needs a Farmer', b.x, b.y + 22, 11, '#ffe6b0', '#e6c27a', 'need');
     if (b.demo) drawDemoMark(b);
     return;
   }
@@ -4893,7 +5033,7 @@ function drawMine(m) {
   const r = S.regions[m.region];
   const owned = !!(r && r.owner === 'player');
   const label = (m.kind === 'stone' ? 'Stone' : 'Iron') + ' mine' + (working ? ' — working' : owned ? ' — no miner' : ' — wild');
-  placeTag(label, m.x, m.y + 22, 11, working ? '#d6ffb0' : '#ffe6b0', working ? '#8fd06a' : '#e6c27a');
+  placeTag(label, m.x, m.y + 22, 11, working ? '#d6ffb0' : '#ffe6b0', working ? '#8fd06a' : '#e6c27a', 'mine');
 }
 function nearbyUpgradeTargets() {
   if (!S || !S.monarch) return [];
@@ -4921,29 +5061,20 @@ function nearbyUpgradeTargets() {
   }
   return out;
 }
-function drawUpgradeBadge(wx, wy, paid, cost, locked, reason, lead) {
+function queueUpgradeBadge(wx, wy, paid, cost, locked, reason, lead, extra) {
   const p = w2s(wx, wy);
   const size = 16, pad = 7, ih = 16;
-  const lockSpr = locked ? getSprite('icon-lock') : null;
   const txt = locked ? (reason || 'Locked') : ((paid || 0) + '/' + cost);
   ctx.font = `800 ${locked ? 13 : size}px "Segoe UI", system-ui, sans-serif`;
-  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   const tw = ctx.measureText(txt).width;
   const iconW = locked || Art.coin ? ih : 0;
   const w = pad + iconW + (iconW ? 5 : 0) + tw + pad, h = 24;
   const x = Math.round(clamp(p.x - w / 2, 6, vw - w - 6));
   const y = Math.round(clamp(p.y - h / 2, TOP_CHROME + 6, vh - BOT_CHROME - h - 6));
-  if (lead && S._upgradeBadges) S._upgradeBadges.push({ x, y, w, h, lead });
-  rrPath(ctx, x, y, w, h, 8);
-  ctx.fillStyle = 'rgba(28,20,14,.88)';
-  ctx.fill();
-  ctx.lineWidth = 2.2;
-  ctx.strokeStyle = locked ? '#e6c27a' : (paid >= cost ? '#8ee0b0' : '#f0c14a');
-  ctx.stroke();
-  if (locked && lockSpr && lockSpr.c) ctx.drawImage(lockSpr.c, x + pad, y + (h - ih) / 2, ih, ih);
-  else if (!locked && Art.coin) ctx.drawImage(Art.coin.c, x + pad, y + (h - ih) / 2, ih, ih);
-  ctx.fillStyle = locked ? '#ffe6b0' : (paid >= cost ? '#e9fff2' : '#fff6e4');
-  ctx.fillText(txt, x + pad + iconW + (iconW ? 5 : 0), y + h / 2 + 0.5);
+  queueLabel(Object.assign({ kind: 'badge', txt, x, y, w, h, paid, cost, locked, reason, lead }, extra || {}));
+}
+function drawUpgradeBadge(wx, wy, paid, cost, locked, reason, lead) {
+  queueUpgradeBadge(wx, wy, paid, cost, locked, reason, lead);
 }
 function drawTowerPathButtons(lead, wx, wy, gate) {
   const p = w2s(wx, wy);
@@ -4954,37 +5085,22 @@ function drawTowerPathButtons(lead, wx, wy, gate) {
   y0 = clamp(y0, TOP_CHROME + 8, vh - BOT_CHROME - bh - 8);
   const locked = !!(gate && !gate.ok && gate.lock !== 'path');
   const reason = locked ? gate.reason : '';
-  if (reason) drawUpgradeBadge(wx, wy - 36, 0, 0, true, reason, lead);
+  if (reason) {
+    // Keep the lock reason with the choice, stacked above the buttons — not over them.
+    queueUpgradeBadge(wx, wy, 0, 0, true, reason, lead, { keepWithChoice: true });
+    const q = S._labelQ[S._labelQ.length - 1];
+    if (q) q.y = Math.round(clamp(y0 - q.h - 8, TOP_CHROME + 2, vh - BOT_CHROME - q.h - 2));
+  }
   const paths = [
     { path: 'cannon', label: 'Cannon', sub: 'Slow area damage' },
     { path: 'ballista', label: 'Ballista', sub: 'Long range, pierces' },
   ];
-  ctx.textBaseline = 'middle';
   for (let i = 0; i < 2; i++) {
     const x = x0 + i * (bw + gap), y = y0;
-    rrPath(ctx, x, y, bw, bh, 12);
-    ctx.fillStyle = 'rgba(28,20,14,.92)';
-    ctx.fill();
-    ctx.lineWidth = 2.6;
-    ctx.strokeStyle = locked ? '#c9b488' : '#f0c14a';
-    ctx.stroke();
-    ctx.textAlign = 'center';
-    ctx.font = '800 18px "Segoe UI", system-ui, sans-serif';
-    ctx.fillStyle = '#fff6e4';
-    ctx.fillText(paths[i].label, x + bw / 2, y + 22);
-    ctx.font = '700 11px "Segoe UI", system-ui, sans-serif';
-    ctx.fillStyle = '#e6c27a';
-    ctx.fillText(paths[i].sub, x + bw / 2, y + 40);
-    if (locked) {
-      const lockSpr = getSprite('icon-lock');
-      if (lockSpr && lockSpr.c) ctx.drawImage(lockSpr.c, x + bw - 22, y + 6, 16, 18);
-    }
-    S._choiceBtns.push({ x, y, w: bw, h: bh, b: lead, path: paths[i].path, locked: !!locked, reason });
+    queueLabel({ kind: 'choice', x, y, w: bw, h: bh, b: lead, path: paths[i].path, label: paths[i].label, sub: paths[i].sub, locked: !!locked, reason });
   }
 }
 function drawUpgradeChrome() {
-  S._choiceBtns = [];
-  S._upgradeBadges = [];
   if (!S || S.over || S.build) return;
   for (const t of nearbyUpgradeTargets()) {
     const lead = t.lead;
@@ -5207,7 +5323,7 @@ function drawFxItem(f) {
       ctx.drawImage(Art.coin.c, px - 5, py - 5, 10, 10);
     }
     ctx.globalAlpha = 1;
-    if (f.n >= 10) placeTag('+' + f.n, f.x, f.y - 26 - u * 12, 12, '#ffd56a', '#e6c27a');
+    if (f.n >= 10) placeTag('+' + f.n, f.x, f.y - 26 - u * 12, 12, '#ffd56a', '#e6c27a', 'loot');
   } else if (f.k === 'txt') {
     ctx.globalAlpha = u < 0.7 ? 1 : (1 - u) / 0.3;
     ctx.font = '900 17px "Segoe UI", system-ui, sans-serif';
@@ -5359,6 +5475,7 @@ function edgeOf(wx, wy) {
 }
 
 function render() {
+  beginLabels();
   if (S.mapDirty) redrawMap();
   beginView();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -5428,14 +5545,14 @@ function render() {
   for (const r of S.regions) if (vis(r.x, r.y)) {
     const st = r.owner === 'player' ? 'YOURS' : r.owner === 'pale' ? 'PALE HOST' : (r.bonus === 'fort' ? 'WILD · fort' : r.bonus === 'keep' ? 'WILD · keep' : 'WILD');
     const lift = r.core && r.core.keep ? 108 : 86;
-    placeTag(r.name, r.x, r.y - lift, 18, '#fff8ee', null);
-    placeTag(st, r.x, r.y - lift + 24, 12, r.owner === 'player' ? '#d6e6ff' : r.owner === 'pale' ? '#d7f0cc' : '#ffe6b0', r.owner === 'player' ? '#7eb0ee' : r.owner === 'pale' ? '#9ddea8' : '#e6c27a');
+    placeTag(r.name, r.x, r.y - lift, 18, '#fff8ee', null, 'name');
+    placeTag(st, r.x, r.y - lift + 24, 12, r.owner === 'player' ? '#d6e6ff' : r.owner === 'pale' ? '#d7f0cc' : '#ffe6b0', r.owner === 'player' ? '#7eb0ee' : r.owner === 'pale' ? '#9ddea8' : '#e6c27a', 'status');
   }
   for (const g of S.guardians) {
     if (!vis(g.x, g.y) || !edgeOf(g.x, g.y).on) continue;
     nameTag(g.name, g.x, g.y + g.r + 16, 13, g.kind === 'warden' ? '#d7f0cc' : '#ffd0c8', g.kind === 'warden' ? '#9ddea8' : '#e07a68');
   }
-  if (S.camp && vis(S.camp.x, S.camp.y)) placeTagClamped('Vagrant camp', S.camp.x, S.camp.y + 18, 12, '#fff6e4', '#c9b488');
+  if (S.camp && vis(S.camp.x, S.camp.y)) placeTagClamped('Vagrant camp', S.camp.x, S.camp.y + 18, 12, '#fff6e4', '#c9b488', 'camp');
   drawWallGhosts();
   for (const a of S.archers) if (a.follow && vis(a.x, a.y)) { ctx.strokeStyle = 'rgba(240,193,74,.85)'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.ellipse(a.x, a.y + 3, 11, 4.5, 0, 0, Math.PI * 2); ctx.stroke(); }
   if (S.sel && S.sel.u) {
@@ -5498,6 +5615,7 @@ function render() {
   // Payment is taken from the purse on the mark tap; no lingering 0/1 count badge.
   drawWallCostBadge();
   drawUpgradeChrome();
+  flushLabels();
   for (const g of S.guardians) {
     const e = edgeOf(g.x, g.y);
     if (e.on) continue;
@@ -5642,6 +5760,7 @@ window.__bc = {
   tryUpgradeTap, upgradeTargetAt, nearestPayableUpgrade, finishUpgrade, applyTier, spriteIdFor, getSprite,
   get mines() { return S && S.mines; },
   get choiceBtns() { return S && S._choiceBtns; },
+  get visibleLabels() { return S && S._visibleLabels; },
 };
 
 buildArt();
