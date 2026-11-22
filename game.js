@@ -771,16 +771,22 @@ function placeBlocked(type, x, y, extra) {
   if (r.core && dist(r.core, { x, y }) < 40) return 'Too close to the banner';
   const rr = BLD[type].r;
   const ignore = extra && extra.ignore;
+  const wallish = t => t === 'wall' || t === 'gate';
+  const tooClose = (other, otherType) => {
+    const d = dist(other, { x, y });
+    if (wallish(type) && wallish(otherType || type)) return d < (TUNE.wallSpacing || 34) - 4;
+    return d < (other.r || rr) + rr + 2;
+  };
   for (const b of S.buildings) {
     if (b === ignore) continue;
-    if (dist(b, { x, y }) < b.r + rr + 2) return 'Spot taken';
+    if (tooClose(b, b.type)) return 'Spot taken';
   }
   for (const s of S.stands) {
     if (s === ignore || S.buildings.includes(s)) continue;
     if (dist(s, { x, y }) < rr + 22) return 'Too close to a tool stand';
   }
   if (extra && extra.others) {
-    for (const o of extra.others) if (dist(o, { x, y }) < rr + (o.r || rr) + 2) return 'Spot taken';
+    for (const o of extra.others) if (tooClose(o, o.type || type)) return 'Spot taken';
   }
   if (isStandType(type) && S.stands.some(st => st.tool === type && st.region === rid && st.owner === 'player')) return 'This land already has a ' + NICE[type];
   for (const t of S.trees) if (dist(t, { x, y }) < (t.r || 16) + rr + 2) return 'Clear the tree first';
