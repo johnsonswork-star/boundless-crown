@@ -1138,8 +1138,21 @@ function tryUpgradeTap(x, y, sx, sy) {
       }
     }
   }
-  const rad = Math.max(36, 52 / scale);
-  const hit = upgradeTargetAt(x, y, rad);
+  let hit = null;
+  if (sx != null && S._upgradeBadges && S._upgradeBadges.length) {
+    for (const badge of S._upgradeBadges) {
+      if (sx >= badge.x && sx <= badge.x + badge.w && sy >= badge.y && sy <= badge.y + badge.h && badge.lead) {
+        hit = badge.lead;
+        break;
+      }
+    }
+  }
+  // With a worker selected, only steal a ground tap that lands on the building body.
+  // The coin-slot / lock badge is handled above so sending past a keep still works.
+  if (!hit) {
+    const rad = S.sel ? Math.max(18, 28 / scale) : Math.max(36, 52 / scale);
+    hit = upgradeTargetAt(x, y, rad);
+  }
   if (!hit) return null;
   if (dist(hit, S.monarch) > (TUNE.upgradeMarkRange || 170)) return null;
   const members = upgradeMembers(hit);
@@ -4902,7 +4915,7 @@ function nearbyUpgradeTargets() {
   }
   return out;
 }
-function drawUpgradeBadge(wx, wy, paid, cost, locked, reason) {
+function drawUpgradeBadge(wx, wy, paid, cost, locked, reason, lead) {
   const p = w2s(wx, wy);
   const size = 16, pad = 7, ih = 16;
   const lockSpr = locked ? getSprite('icon-lock') : null;
@@ -4914,6 +4927,7 @@ function drawUpgradeBadge(wx, wy, paid, cost, locked, reason) {
   const w = pad + iconW + (iconW ? 5 : 0) + tw + pad, h = 24;
   const x = Math.round(clamp(p.x - w / 2, 6, vw - w - 6));
   const y = Math.round(clamp(p.y - h / 2, TOP_CHROME + 6, vh - BOT_CHROME - h - 6));
+  if (lead && S._upgradeBadges) S._upgradeBadges.push({ x, y, w, h, lead });
   rrPath(ctx, x, y, w, h, 8);
   ctx.fillStyle = 'rgba(28,20,14,.88)';
   ctx.fill();
@@ -4934,7 +4948,7 @@ function drawTowerPathButtons(lead, wx, wy, gate) {
   y0 = clamp(y0, TOP_CHROME + 8, vh - BOT_CHROME - bh - 8);
   const locked = !!(gate && !gate.ok && gate.lock !== 'path');
   const reason = locked ? gate.reason : '';
-  if (reason) drawUpgradeBadge(wx, wy - 36, 0, 0, true, reason);
+  if (reason) drawUpgradeBadge(wx, wy - 36, 0, 0, true, reason, lead);
   const paths = [
     { path: 'cannon', label: 'Cannon', sub: 'Slow area damage' },
     { path: 'ballista', label: 'Ballista', sub: 'Long range, pierces' },
@@ -4964,6 +4978,7 @@ function drawTowerPathButtons(lead, wx, wy, gate) {
 }
 function drawUpgradeChrome() {
   S._choiceBtns = [];
+  S._upgradeBadges = [];
   if (!S || S.over || S.build) return;
   for (const t of nearbyUpgradeTargets()) {
     const lead = t.lead;
@@ -4977,16 +4992,16 @@ function drawUpgradeChrome() {
       continue;
     }
     if (g && g.paid > 0) {
-      drawUpgradeBadge(t.x, t.y - lift, g.paid, g.cost, false, '');
+      drawUpgradeBadge(t.x, t.y - lift, g.paid, g.cost, false, '', lead);
       continue;
     }
     const need = upgradeNeed(lead);
     if (!need.ok) {
       if (need.lock === 'max') continue;
-      drawUpgradeBadge(t.x, t.y - lift, 0, 0, true, need.reason);
+      drawUpgradeBadge(t.x, t.y - lift, 0, 0, true, need.reason, lead);
       continue;
     }
-    drawUpgradeBadge(t.x, t.y - lift, 0, need.cost, false, '');
+    drawUpgradeBadge(t.x, t.y - lift, 0, need.cost, false, '', lead);
   }
 }
 function drawWallCostBadge() {
