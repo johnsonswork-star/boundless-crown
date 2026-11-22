@@ -1,0 +1,11 @@
+# Pages-hosted copy of the same Worker (same D1). No secrets.
+# Used as the public API URL because *.pages.dev is a single-label hostname.
+name = "boundless-crown-api"
+compatibility_date = "2026-11-22"
+pages_build_output_dir = "public"
+account_id = "ff3a2b410bd5081d42ddbdc5d78611ad"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "boundless-crown"
+database_id = "cb395cef-9795-40df-94cd-845e9f10d238"

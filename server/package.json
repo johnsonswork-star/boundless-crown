@@ -1,0 +1,9 @@
+{
+  "name": "boundless-crown-server",
+  "private": true,
+  "description": "Boundless Crown Endless backend (Cloudflare Workers + D1). No secrets in this package.",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "schema": "wrangler d1 execute boundless-crown --remote --file=schema.sql"
+  }
+}

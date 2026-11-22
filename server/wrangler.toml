@@ -1,0 +1,12 @@
+# Public Worker config. Do not put API tokens or passwords here.
+name = "boundless-crown"
+main = "src/worker.js"
+compatibility_date = "2026-11-22"
+account_id = "ff3a2b410bd5081d42ddbdc5d78611ad"
+
+# Free plan only: no Durable Objects, no Workers Paid features.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "boundless-crown"
+database_id = "cb395cef-9795-40df-94cd-845e9f10d238"
