@@ -5,23 +5,24 @@
 const W = 2400, H = 2400, CX = W / 2, CY = H / 2;
 const DAY = 60, NIGHT = 45, CELL = 8, GW = W / CELL, GH = H / CELL;
 const COST = { wall: 4, tower: 12, farm: 8, house: 6 };
-const NICE = { wall: 'Wall', tower: 'Tower', farm: 'Farm', house: 'House', fort: 'Fort', gate: 'Gate', bow: 'Bow stand', hammer: 'Hammer stand', scythe: 'Scythe stand', clear: 'Clear', demolish: 'Demolish' };
+const NICE = { wall: 'Wall', tower: 'Tower', farm: 'Farm', house: 'House', fort: 'Fort', gate: 'Gate', bow: 'Bow stand', hammer: 'Hammer stand', scythe: 'Scythe stand', pick: 'Pickaxe stand', clear: 'Clear', demolish: 'Demolish' };
 const TOOL = {
   bow:    { cost: 4, role: 'archer',  label: 'Bow' },
   hammer: { cost: 3, role: 'builder', label: 'Hammer' },
   scythe: { cost: 4, role: 'farmer',  label: 'Scythe' },
+  pick:   { cost: 4, role: 'miner',   label: 'Pickaxe' },
 };
 // Tuning knobs (Kingdom-style economy). All in one place for playtest iteration.
 const TUNE = {
   startCoins: 3, keepSlots: 0, houseSlots: 1, startHouses: 1, startBuilders: 1,
   trickleEvery: 10,              // +1 coin per owned region every N s by day (small passive)
   dropRange: 64, pickupGrace: 0.6, standMax: 3,
-  standCost: { bow: 5, hammer: 3, scythe: 5 }, // Build-menu price; Hammer is cheap so you can get going
+  standCost: { bow: 5, hammer: 3, scythe: 5, pick: 5 }, // Build-menu price; Hammer is cheap so you can get going
   // Per-tool stock prices live on TOOL (Bow 4, Hammer 3, Scythe 4).
   gateCost: 6, wallSpacing: 34,
   zoomMin: 0.55, zoomMax: 2.4, zoomStart: 1,
   vagrantEvery: 18, vagrantMax: 4, vagrantStart: 2,
-  buildTime: { wall: 4, tower: 8, farm: 5, house: 6, bow: 5, hammer: 4, scythe: 5, gate: 5 }, repairRate: 14,
+  buildTime: { wall: 4, tower: 8, farm: 5, house: 6, bow: 5, hammer: 4, scythe: 5, pick: 5, gate: 5 }, repairRate: 14,
   farmEvery: 5, farmCoins: 1,    // a worked farm pays farmCoins every farmEvery s, by day
   coreHome: 280, coreCaptured: 150, coreRetaken: 130, coreKeep: 320,
   waveBase: 2, wavePerNight: 7, wavePerRegion: 2,
@@ -43,6 +44,36 @@ const TUNE = {
   navRepathMax: 6,     // new A* searches allowed per update tick
   navIterMax: 2500,    // A* node expansions cap
   navCache: 96,        // cached start-goal paths kept between rebuilds
+  // Building upgrades (Wood / Stone / Iron). Level 1 uses today's build prices.
+  upgradeCost: { 2: 12, 3: 20 },
+  upgradeTime: 6,
+  upgradeMarkRange: 170,
+  keepHp: [280, 480, 720],
+  keepR: [22, 26, 30],
+  houseHp: [130, 220, 340],
+  houseR: [18, 22, 26],
+  houseSlotsByLevel: [1, 2, 3],
+  wallHp: [160, 300, 480],
+  wallR: [16, 17, 18],
+  wallSpikeDmg: 8,
+  gateHp: [140, 260, 400],
+  gateR: [16, 17, 18],
+  farmHp: [70, 110, 160],
+  farmR: [24, 26, 28],
+  farmCoinsByLevel: [1, 2, 3],
+  fortHp: [260, 400, 600],
+  fortR: [22, 26, 30],
+  fortRange: [220, 260, 300],
+  fortDmg: [13, 18, 24],
+  fortArchers: [1, 2, 2],
+  towerHp: { 1: 120, cannon: [220, 360], ballista: [200, 340] },
+  towerR: { 1: 16, cannon: [20, 24], ballista: [18, 22] },
+  towerRange: { 1: 220, cannon: [200, 230], ballista: [340, 420] },
+  towerDmg: { 1: 12, cannon: [28, 44], ballista: [22, 34] },
+  towerCd: { 1: 0.8, cannon: [2.4, 2.2], ballista: [1.6, 1.4] },
+  towerAoe: { cannon: [56, 80], ballista: [0, 0] },
+  towerPierce: { cannon: [0, 0], ballista: [3, 5] },
+  mineR: 22,
 };
 
 const DEBUG = new URLSearchParams(location.search).get('debug') === '1';
@@ -61,6 +92,7 @@ const BLD = {
   bow:    { hp: 90, r: 16 },
   hammer: { hp: 90, r: 16 },
   scythe: { hp: 90, r: 16 },
+  pick:   { hp: 90, r: 16 },
   gate:   { hp: 140, r: 16 },
 };
 Object.assign(COST, TUNE.standCost);
@@ -111,7 +143,7 @@ function newGame() {
   S = {
     seed, t: 0, phase: 'day', phaseT: DAY, day: 1, nights: 0, nightSpawned: false, coins: TUNE.startCoins, trickle: 0,
     regions: [], buildings: [], archers: [], undead: [], guardians: [], fx: [],
-    folk: [], drops: [], stands: [], camp: null, vagrantT: TUNE.vagrantEvery, rally: false, dropHold: false, dropT: 0, postT: 0,
+    folk: [], drops: [], stands: [], mines: [], camp: null, vagrantT: TUNE.vagrantEvery, rally: false, dropHold: false, dropT: 0, postT: 0,
     spawnQ: [], spawnT: 0, spawnGap: 1, leader: null, chaos: false, focus: null, waveSrc: null,
     build: null, over: false, kills: 0, mapDirty: true,
     stats: { towerShots: 0, paleTowerShots: 0, spawned: 0, captures: 0, losses: 0, retakes: 0,
@@ -134,6 +166,8 @@ function newGame() {
   const home = S.regions[0];
   home.owner = 'player';
   home.core = mkCore(home, TUNE.coreHome);
+  home.core.keep = true;
+  applyTier(home.core, true);
   for (const r of S.regions) {
     if (r.id === 0) continue;
     r.bonus = rnd() < 0.6 ? (rnd() < 0.5 ? 'fort' : 'keep') : null;
@@ -143,7 +177,9 @@ function newGame() {
   }
   S.monarch.x = home.x; S.monarch.y = home.y + 40;
   S.focus = null;
+  S.mines = [];
   setupHome();
+  placeMines(rnd);
   markNavDirty();
   buildDecor();
   bakeGround();
@@ -158,8 +194,10 @@ function newGame() {
   toast('Start with your Builder and House. Order a Hammer stand, then drop coins on vagrants and stands', '');
 }
 function mkBld(type, x, y, rid, built) {
-  const spec = BLD[type];
-  return { type, x, y, r: spec.r, hp: built ? spec.hp : Math.ceil(spec.hp * 0.15), max: spec.hp, owner: 'player', region: rid, cd: 0, built: built ? 1 : 0 };
+  const b = { type, x, y, r: 16, hp: 1, max: 1, owner: 'player', region: rid, cd: 0, built: built ? 1 : 0, level: 1, path: null };
+  applyTier(b, true);
+  if (!built) b.hp = Math.ceil(b.max * 0.15);
+  return b;
 }
 function mkFolk(role, x, y) {
   return { type: 'folk', role, x, y, r: 9, hp: 24, max: 24, tx: null, ty: null, wt: 0, ph: Math.random() * 6.28, job: null, stand: null, state: 'idle' };
@@ -234,7 +272,7 @@ function refreshCamps() {
   if (S.camp) settleVagrants();
 }
 function mkRegion(id, x, y) { return { id, x, y, name: NAMES[id], owner: 'wild', core: null, bonus: null, weakened: false }; }
-function mkCore(r, hp) { return { type: 'core', x: r.x, y: r.y, r: 20, hp, max: hp, region: r.id, keep: false }; }
+function mkCore(r, hp) { return { type: 'core', x: r.x, y: r.y, r: 20, hp, max: hp, region: r.id, keep: false, level: 1 }; }
 const owned = () => S.regions.filter(r => r.owner === 'player');
 
 // ---------- toasts / hint ----------
@@ -514,6 +552,7 @@ function onTap(sx, sy) {
   if (S.build === 'clear') return tryMarkDecor(w.x, w.y, true);
   if (S.build === 'demolish') return tryMarkDemo(w.x, w.y, true);
   if (S.build) return tryPlace(S.build, w.x, w.y);
+  if (S._choiceBtns && S._choiceBtns.length && tryUpgradeTap(w.x, w.y, sx, sy)) return;
   const hit = workerAt(w.x, w.y);
   // Prefer a tree/rock under the finger unless a worker is already selected (then a worker tap switches/deselects).
   const decor = decorAt(w.x, w.y, Math.max(28, 48 / scale));
@@ -527,6 +566,8 @@ function onTap(sx, sy) {
       return;
     }
   }
+  // A worker send must not swallow a coin-slot / path-button tap on a nearby upgrade.
+  if (tryUpgradeTap(w.x, w.y, sx, sy)) return;
   if (S.sel) { sendWorker(S.sel.u, w.x, w.y); return; }
   if (tryMarkDecor(w.x, w.y, false)) return;
   // tap an enemy to focus it
@@ -631,12 +672,14 @@ function evictToCap() {
       if (over <= 0) break;
       if (f.role === 'vagrant' || !pred(f)) continue;
       if (f.role === 'farmer' && f.job && f.job.farmer === f) f.job.farmer = null;
+      if (f.role === 'miner') for (const m of (S.mines || [])) if (m.miner === f) m.miner = null;
       f.role = 'vagrant'; f.job = null; f.stand = null; f.tx = null; f.state = 'idle';
       over--; n++;
     }
   };
   evictFolk(f => f.role === 'villager');
   evictFolk(f => f.role === 'farmer');
+  evictFolk(f => f.role === 'miner');
   evictFolk(f => f.role === 'builder' && S.folk.filter(o => o.role === 'builder').length > 1);
   for (let i = S.archers.length - 1; i >= 0 && over > 0; i--) {
     const a = S.archers[i];
@@ -742,6 +785,7 @@ function placeBlocked(type, x, y, extra) {
   if (isStandType(type) && S.stands.some(st => st.tool === type && st.region === rid && st.owner === 'player')) return 'This land already has a ' + NICE[type];
   for (const t of S.trees) if (dist(t, { x, y }) < (t.r || 16) + rr + 2) return 'Clear the tree first';
   for (const rk of S.rocks) if (dist(rk, { x, y }) < (rk.r || 12) + rr + 2) return 'Clear the rock first';
+  for (const m of (S.mines || [])) if (dist(m, { x, y }) < (m.r || 22) + rr + 4) return 'Too close to a mine';
   return null;
 }
 function swapWallForGate(wall) {
@@ -751,7 +795,7 @@ function swapWallForGate(wall) {
   wall.type = 'gate';
   markNavDirty();
   const ratio = wall.max ? wall.hp / wall.max : 1;
-  wall.max = BLD.gate.hp; wall.r = BLD.gate.r;
+  applyTier(wall, false);
   wall.hp = Math.max(1, Math.ceil(wall.max * (wall.built >= 1 ? ratio : Math.max(0.15, wall.built || 0))));
   toast(wall.built >= 1 ? 'Wall swapped for a Gate' : 'Wall order swapped for a Gate', 'good');
   return wall;
@@ -836,9 +880,295 @@ function floatTxt(x, y, txt, col) {
 function workers() { let n = S.archers.length; for (const f of S.folk) if (f.role !== 'vagrant') n++; return n; }
 function housingCap() {
   let c = S.regions[0].owner === 'player' ? TUNE.keepSlots : 0;
-  for (const b of S.buildings) if (b.type === 'house' && b.owner === 'player' && b.built >= 1) c += TUNE.houseSlots;
+  for (const b of S.buildings) if (b.type === 'house' && b.owner === 'player' && b.built >= 1) c += houseSlotsOf(b);
   return c;
 }
+function keepLevel() {
+  const h = S && S.regions && S.regions[0];
+  return (h && h.owner === 'player' && h.core && h.core.level) || 1;
+}
+function isPlayerKeep(k) {
+  if (!k || k.type !== 'core') return false;
+  const h = S.regions[0];
+  return k === h.core || !!k.keep;
+}
+function houseSlotsOf(b) {
+  const lv = Math.max(1, Math.min(3, (b && b.level) || 1));
+  const arr = TUNE.houseSlotsByLevel || [TUNE.houseSlots || 1, 2, 3];
+  return arr[lv - 1] || 1;
+}
+function farmCoinsOf(b) {
+  const lv = Math.max(1, Math.min(3, (b && b.level) || 1));
+  const arr = TUNE.farmCoinsByLevel || [TUNE.farmCoins || 1, 2, 3];
+  return arr[lv - 1] || 1;
+}
+function upgradeCostTo(lv) { return (TUNE.upgradeCost && TUNE.upgradeCost[lv]) || (lv === 2 ? 12 : 20); }
+function pathIndex(lv) { return lv <= 2 ? 0 : 1; }
+function towerCombat(b) {
+  const lv = b.level || 1, path = b.path;
+  if (lv <= 1 || !path) {
+    return { hp: TUNE.towerHp[1], r: TUNE.towerR[1], range: TUNE.towerRange[1], dmg: TUNE.towerDmg[1], cd: TUNE.towerCd[1], aoe: 0, pierce: 0 };
+  }
+  const i = pathIndex(lv);
+  return {
+    hp: TUNE.towerHp[path][i], r: TUNE.towerR[path][i], range: TUNE.towerRange[path][i],
+    dmg: TUNE.towerDmg[path][i], cd: TUNE.towerCd[path][i],
+    aoe: (TUNE.towerAoe[path] || [0, 0])[i] || 0,
+    pierce: (TUNE.towerPierce[path] || [0, 0])[i] || 0
+  };
+}
+function applyTier(b, init) {
+  if (!b) return;
+  const lv = Math.max(1, Math.min(3, b.level || 1));
+  const prevMax = b.max || 0;
+  let max = prevMax, r = b.r || 16;
+  if (b.type === 'core') {
+    if (isPlayerKeep(b)) { max = TUNE.keepHp[lv - 1]; r = TUNE.keepR[lv - 1]; }
+  } else if (b.type === 'house') { max = TUNE.houseHp[lv - 1]; r = TUNE.houseR[lv - 1]; }
+  else if (b.type === 'wall') { max = TUNE.wallHp[lv - 1]; r = TUNE.wallR[lv - 1]; }
+  else if (b.type === 'gate') { max = TUNE.gateHp[lv - 1]; r = TUNE.gateR[lv - 1]; }
+  else if (b.type === 'farm') { max = TUNE.farmHp[lv - 1]; r = TUNE.farmR[lv - 1]; }
+  else if (b.type === 'fort') { max = TUNE.fortHp[lv - 1]; r = TUNE.fortR[lv - 1]; }
+  else if (b.type === 'tower') {
+    const c = towerCombat(b); max = c.hp; r = c.r;
+  } else if (BLD[b.type]) { max = BLD[b.type].hp; r = BLD[b.type].r; }
+  b.max = max; b.r = r;
+  if (init) b.hp = (b.built >= 1 || b.type === 'core') ? max : Math.ceil(max * 0.15);
+  else if (max > prevMax) b.hp = Math.min(max, (b.hp || 0) + (max - prevMax));
+  else b.hp = Math.min(b.hp || max, max);
+}
+function mineOf(kind) { return (S.mines || []).find(m => m.kind === kind) || null; }
+function minerReach(m) {
+  return (m && m.r || TUNE.mineR || 22) + (TUNE.navPad || 10) + 16;
+}
+function minerAtMine(m) {
+  if (!m || !m.miner) return null;
+  const f = m.miner;
+  if (!S.folk.includes(f) || f.role !== 'miner') { m.miner = null; return null; }
+  if (dist(f, m) > minerReach(m)) return null;
+  return f;
+}
+function materialReady(kind) {
+  const m = mineOf(kind);
+  if (!m) return false;
+  const r = S.regions[m.region];
+  return !!(r && r.owner === 'player' && minerAtMine(m));
+}
+function mineOwned(kind) {
+  const m = mineOf(kind);
+  if (!m) return false;
+  const r = S.regions[m.region];
+  return !!(r && r.owner === 'player');
+}
+function upgradeNeed(target, levelTo) {
+  if (!target) return { ok: false, lock: 'none', reason: 'No target' };
+  if ((target.level || 1) >= 3) return { ok: false, lock: 'max', reason: 'Already iron' };
+  const lv = levelTo || (target.level || 1) + 1;
+  if (lv > 3) return { ok: false, lock: 'max', reason: 'Already iron' };
+  if (target.type === 'tower' && lv >= 2 && !target.path && !target._pickPath) {
+    return { ok: false, lock: 'path', reason: 'Choose Cannon or Ballista' };
+  }
+  const isKeep = isPlayerKeep(target);
+  if (!isKeep && lv > keepLevel()) return { ok: false, lock: 'keep', reason: 'Need Keep Lv ' + lv };
+  const mat = lv === 2 ? 'stone' : 'iron';
+  if (!mineOwned(mat)) return { ok: false, lock: 'mine', reason: 'Need an owned ' + mat + ' mine' };
+  if (!materialReady(mat)) return { ok: false, lock: 'miner', reason: 'Need a miner at the ' + mat + ' mine' };
+  return { ok: true, lock: null, reason: '', mat, levelTo: lv, cost: upgradeCostTo(lv) };
+}
+function wallConnected(start) {
+  if (!start || (start.type !== 'wall' && start.type !== 'gate')) return [start];
+  const reach = (TUNE.wallSpacing || 34) * 1.35;
+  const all = S.buildings.filter(b => (b.type === 'wall' || b.type === 'gate') && b.owner === start.owner && b.built >= 1);
+  const out = [], seen = new Set();
+  const q = [start];
+  seen.add(start);
+  while (q.length) {
+    const cur = q.pop();
+    out.push(cur);
+    for (const b of all) {
+      if (seen.has(b)) continue;
+      if (dist(b, cur) <= reach + (b.r || 16) * 0.2) { seen.add(b); q.push(b); }
+    }
+  }
+  return out;
+}
+function upgradeMembers(target) {
+  if (!target) return [];
+  if (target.type === 'wall' || target.type === 'gate') {
+    const line = wallConnected(target);
+    const minL = Math.min(...line.map(b => b.level || 1));
+    return line.filter(b => (b.level || 1) === minL);
+  }
+  return [target];
+}
+function cancelUpgrade(g) {
+  if (!g || g.prog > 0) return;
+  const refund = g.paid || 0;
+  if (refund) { S.coins += refund; const a = g.members[0]; floatTxt(a.x, a.y - 36, '+' + refund, '#ffd56a'); }
+  for (const b of g.members) { if (b.upgGroup === g) b.upgGroup = null; if (b._pickPath) delete b._pickPath; }
+  for (const f of S.folk) if (f.job === g) f.job = null;
+  toast(refund ? 'Upgrade cancelled — coins refunded' : 'Upgrade cancelled');
+}
+function beginUpgrade(members, levelTo, path) {
+  const lead = members[0];
+  const need = upgradeNeed(lead, levelTo);
+  if (!need.ok) return need;
+  if (lead.type === 'tower' && levelTo >= 2) {
+    const p = path || lead.path || lead._pickPath;
+    if (!p) return { ok: false, lock: 'path', reason: 'Choose Cannon or Ballista' };
+    for (const b of members) b._pickPath = p;
+  }
+  let g = lead.upgGroup;
+  if (g && g.prog > 0) return { ok: false, lock: 'busy', reason: 'A builder is already working' };
+  if (!g) {
+    const cx = members.reduce((s, b) => s + b.x, 0) / members.length;
+    const cy = members.reduce((s, b) => s + b.y, 0) / members.length;
+    g = { members, levelTo, paid: 0, cost: need.cost, prog: 0, path: (lead._pickPath || lead.path || null), x: cx, y: cy, r: lead.r || 16, type: 'upgrade' };
+    for (const b of members) b.upgGroup = g;
+  }
+  return { ok: true, group: g, cost: g.cost, paid: g.paid, need };
+}
+function payUpgrade(g, n) {
+  if (!g || g.prog > 0) return 0;
+  const room = g.cost - g.paid;
+  const add = Math.min(room, n);
+  g.paid += add;
+  g.paidAt = performance.now();
+  const a = g.members[0];
+  floatTxt(a.x, a.y - 36, '-' + add, '#ffb0a0');
+  if (g.paid >= g.cost) toast('Upgrade paid — a Builder will raise it', 'good');
+  return add;
+}
+function finishUpgrade(g) {
+  if (!g) return;
+  for (const b of g.members) {
+    b.level = g.levelTo;
+    if (g.path && b.type === 'tower') b.path = g.path;
+    delete b._pickPath;
+    applyTier(b, false);
+    b.upgGroup = null;
+  }
+  markNavDirty();
+  const a = g.members[0];
+  const label = isPlayerKeep(a) ? 'Keep' : (NICE[a.type] || a.type);
+  const mat = g.levelTo === 2 ? 'Stone' : 'Iron';
+  floatTxt(a.x, a.y - 44, mat + ' ' + label, '#d6ffb0');
+  if (a.type === 'house') toast(`House upgraded — now holds ${houseSlotsOf(a)} workers`, 'good');
+  else if (a.type === 'tower' && g.path) toast((g.path === 'cannon' ? 'Cannon' : 'Ballista') + ' tower raised', 'good');
+  else if (g.members.length > 1) toast('Wall line upgraded to ' + mat.toLowerCase(), 'good');
+  else toast(label + ' upgraded to ' + mat.toLowerCase(), 'good');
+  if (isPlayerKeep(a) && g.levelTo >= 2) toast('An archer now guards the keep', 'good');
+}
+function isUpgradeJob(j) { return !!(j && j.members && j.paid >= j.cost && j.prog < 1); }
+function placeMines(rnd) {
+  S.mines = [];
+  const used = new Set([0]);
+  for (const kind of ['stone', 'iron']) {
+    const cands = S.regions.filter(r => r.id !== 0 && !used.has(r.id));
+    for (let i = cands.length - 1; i > 0; i--) {
+      const j = (rnd() * (i + 1)) | 0;
+      const tmp = cands[i]; cands[i] = cands[j]; cands[j] = tmp;
+    }
+    cands.sort((a, b) => Math.hypot(b.x - CX, b.y - CY) - Math.hypot(a.x - CX, a.y - CY));
+    const r = cands[0] || S.regions[1];
+    used.add(r.id);
+    const ang = Math.atan2(r.y - CY, r.x - CX) + (rnd() - 0.5) * 0.9;
+    const d = 70 + rnd() * 50;
+    const x = clamp(r.x + Math.cos(ang) * d, 80, W - 80);
+    const y = clamp(r.y + Math.sin(ang) * d, 80, H - 80);
+    S.mines.push({ type: 'mine', kind, x, y, r: TUNE.mineR || 22, region: r.id, miner: null });
+  }
+}
+function upgradeTargetAt(x, y, rad) {
+  const pt = { x, y };
+  let best = null, bd = rad;
+  for (const b of S.buildings) {
+    if (b.owner !== 'player' || b.built < 1 || b.tool || b.demo) continue;
+    if (b.type === 'bow' || b.type === 'hammer' || b.type === 'scythe' || b.type === 'pick') continue;
+    const d = dist(b, pt) - (b.r || 16);
+    if (d < bd) { bd = d; best = b; }
+  }
+  for (const r of owned()) {
+    if (!r.core || !isPlayerKeep(r.core)) continue;
+    const d = dist(r.core, pt) - (r.core.r || 22);
+    if (d < bd) { bd = d; best = r.core; }
+  }
+  return best;
+}
+function nearestPayableUpgrade(pt, rad) {
+  let best = null, bd = rad;
+  const consider = [];
+  for (const b of S.buildings) if (b.owner === 'player' && b.built >= 1 && !b.tool && !b.demo) consider.push(b);
+  for (const r of owned()) if (r.core && isPlayerKeep(r.core)) consider.push(r.core);
+  for (const b of consider) {
+    const d = dist(b, pt) - (b.r || 16);
+    if (d >= bd) continue;
+    const members = upgradeMembers(b);
+    const lead = members[0];
+    if ((lead.level || 1) >= 3) continue;
+    if (lead.upgGroup && lead.upgGroup.paid >= lead.upgGroup.cost) continue;
+    const need = upgradeNeed(lead, (lead.level || 1) + 1);
+    if (!need.ok && need.lock !== 'path') continue;
+    if (need.lock === 'path') continue;
+    if (dist(S.monarch, b) > (TUNE.upgradeMarkRange || 170)) continue;
+    bd = d; best = b;
+  }
+  return best;
+}
+function tryUpgradeTap(x, y, sx, sy) {
+  const btns = S._choiceBtns;
+  if (btns && btns.length && sx != null) {
+    for (const btn of btns) {
+      if (sx >= btn.x && sx <= btn.x + btn.w && sy >= btn.y && sy <= btn.y + btn.h) {
+        const b = btn.b;
+        if (dist(b, S.monarch) > (TUNE.upgradeMarkRange || 170)) { toast('Move closer to upgrade that', 'bad'); return true; }
+        if (btn.locked) { toast(btn.reason, 'bad'); return true; }
+        if (b.path && b.path !== btn.path) { toast('This tower already chose its path', 'bad'); return true; }
+        b._pickPath = btn.path;
+        const members = upgradeMembers(b);
+        const started = beginUpgrade(members, (b.level || 1) + 1, btn.path);
+        if (!started.ok) { toast(started.reason, 'bad'); return true; }
+        const g = started.group;
+        if (g.paid >= g.cost) { toast('A Builder is already on the way', 'good'); return true; }
+        const remain = g.cost - g.paid;
+        if (S.coins < remain) { toast('Need ' + remain + ' coins', 'bad'); return true; }
+        S.coins -= remain;
+        payUpgrade(g, remain);
+        return true;
+      }
+    }
+  }
+  const rad = Math.max(36, 52 / scale);
+  const hit = upgradeTargetAt(x, y, rad);
+  if (!hit) return null;
+  if (dist(hit, S.monarch) > (TUNE.upgradeMarkRange || 170)) return null;
+  const members = upgradeMembers(hit);
+  const lead = members[0];
+  if (lead.upgGroup && lead.upgGroup.paid > 0 && lead.upgGroup.prog <= 0) {
+    // A single press can fire pointerup twice (especially with look-free / touch). Don't refund instantly.
+    if ((performance.now() - (lead.upgGroup.paidAt || 0)) < 500) return true;
+    cancelUpgrade(lead.upgGroup);
+    return true;
+  }
+  if (lead.type === 'tower' && (lead.level || 1) === 1 && !lead.path) {
+    // Path choice is drawn as buttons; a body tap is ignored so the two targets stay the only way to pick.
+    const need = upgradeNeed(Object.assign({}, lead, { _pickPath: 'cannon' }), 2);
+    if (!need.ok && need.lock !== 'path') toast(need.reason, 'bad');
+    return true;
+  }
+  const need = upgradeNeed(lead);
+  if (!need.ok) { toast(need.reason, 'bad'); return true; }
+  const started = beginUpgrade(members, need.levelTo, lead.path);
+  if (!started.ok) { toast(started.reason, 'bad'); return true; }
+  const g = started.group;
+  if (g.paid >= g.cost) return true;
+  const remain = g.cost - g.paid;
+  if (S.coins < remain) { toast('Need ' + remain + ' coins', 'bad'); return true; }
+  S.coins -= remain;
+  payUpgrade(g, remain);
+  return true;
+}
+
 function dropCoin() {
   if (!S || S.over) return false;
   const m = S.monarch;
@@ -851,6 +1181,8 @@ function dropCoin() {
 function claimTarget(d) {
   let best = null, bd = TUNE.dropRange;
   if (S.regions[0].owner === 'player') for (const st of S.stands) if (st.owner === 'player' && st.built >= 1 && st.tools < TUNE.standMax) { const dd = dist(st, d); if (dd < bd) { bd = dd; best = st; } }
+  const up = nearestPayableUpgrade(d, bd);
+  if (up) { best = up; bd = dist(up, d) - (up.r || 16); }
   const free = workers() < housingCap();
   d.noHouse = false;
   for (const f of S.folk) if (f.role === 'vagrant') {
@@ -860,6 +1192,17 @@ function claimTarget(d) {
   return best;
 }
 function applyClaim(t) {
+  if (t && (t.type === 'core' || (S.buildings.includes(t) && !t.tool))) {
+    const members = upgradeMembers(t);
+    const lead = members[0];
+    const need = upgradeNeed(lead);
+    if (!need.ok) return;
+    const started = beginUpgrade(members, need.levelTo, lead.path || lead._pickPath);
+    if (!started.ok) return;
+    const g = started.group;
+    if (g.paid < g.cost) payUpgrade(g, 1);
+    return;
+  }
   if (t.tool) {
     t.paid++;
     const c = TOOL[t.tool].cost;
@@ -941,6 +1284,10 @@ function rebuildNav() {
     for (const r of S.regions) if (r.core) {
       stamp(friend, r.core.x, r.core.y, r.core.r || 20);
       stamp(foe, r.core.x, r.core.y, r.core.r || 20);
+    }
+    for (const m of (S.mines || [])) {
+      stamp(friend, m.x, m.y, m.r || 22);
+      stamp(foe, m.x, m.y, m.r || 22);
     }
   }
   const n = gw * gh;
@@ -1176,6 +1523,10 @@ function workReach(j, f) {
   const extra = Math.max(8, (TUNE.navPad == null ? 10 : TUNE.navPad) + (TUNE.navCell || 16) * 0.75);
   return (j.r || 16) + (f.r || 9) + extra;
 }
+function workArrive(j, f) {
+  // Half a cell of slack so a snapped approach cannot sit a fraction of a pixel outside reach.
+  return workReach(j, f) + (TUNE.navCell || 16) * 0.5;
+}
 function approachSpots(j, f) {
   const reach = workReach(j, f);
   // Stay inside work reach, but outside the target itself when it blocks friends
@@ -1208,10 +1559,10 @@ function pickApproach(f, j) {
   return ring || fallback;
 }
 function moveToJob(f, j, sp, dt) {
-  if (dist(f, j) <= workReach(j, f)) return true;
+  if (dist(f, j) <= workArrive(j, f)) return true;
   const pt = pickApproach(f, j);
   moveTo(f, pt.x, pt.y, sp, dt);
-  return dist(f, j) <= workReach(j, f);
+  return dist(f, j) <= workArrive(j, f);
 }
 function wanderAround(f, cx, cy, rad, dt, sp) {
   f.wt -= dt;
@@ -1220,6 +1571,7 @@ function wanderAround(f, cx, cy, rad, dt, sp) {
 }
 function jobValid(j) {
   if (!j) return false;
+  if (isUpgradeJob(j)) return true;
   if (isClearJob(j) || isDemoJob(j)) return true;
   if (j.type === 'core') { const r = S.regions[j.region]; return r.core === j && r.owner === 'player' && j.hp < j.max; }
   return S.buildings.includes(j) && j.owner === 'player' && (j.built < 1 || j.hp < j.max);
@@ -1233,6 +1585,13 @@ function pickBuildJob(f, night) {
   for (const b of S.buildings) if (b.owner === 'player' && b.built < 1 && !b.demo) {
     const d = dist(b, f) + (taken.has(b) ? 600 : 0); if (d < bd) { bd = d; best = b; }
   }
+  const seenG = new Set();
+  for (const b of S.buildings.concat(owned().map(r => r.core).filter(Boolean))) {
+    const g = b && b.upgGroup;
+    if (!isUpgradeJob(g) || seenG.has(g)) continue;
+    seenG.add(g);
+    const d = dist(g, f) + (taken.has(g) ? 600 : 0); if (d < bd) { bd = d; best = g; }
+  }
   for (const t of S.trees) if (isClearJob(t)) { const d = dist(t, f) + (taken.has(t) ? 600 : 0); if (d < bd) { bd = d; best = t; } }
   for (const rk of S.rocks) if (isClearJob(rk)) { const d = dist(rk, f) + (taken.has(rk) ? 600 : 0); if (d < bd) { bd = d; best = rk; } }
   if (best || night) return best;
@@ -1244,7 +1603,7 @@ function onBuilt(b) {
   markNavDirty();
   S.stats.built++;
   floatTxt(b.x, b.y - 40, NICE[b.type] + ' built', '#d6ffb0');
-  if (b.type === 'house') toast(`House built — +${TUNE.houseSlots} worker slot${TUNE.houseSlots === 1 ? '' : 's'}`, 'good');
+  if (b.type === 'house') toast(`House built — +${houseSlotsOf(b)} worker slot${houseSlotsOf(b) === 1 ? '' : 's'}`, 'good');
   else if (b.type === 'farm') toast('Farm built — a Farmer can work it for coins', 'good');
   else if (b.tool) toast(NICE[b.tool] + ' built — drop coins to stock tools', 'good');
   else if (b.type === 'gate') toast('Gate built — your people can pass, the Pale Host cannot', 'good');
@@ -1255,8 +1614,9 @@ function becomeRole(f, role) {
     f.dead = true;
     S.archers.push({ type: 'archer', x: f.x, y: f.y, r: 10, hp: 40, max: 40, cd: 0, follow: false, post: null, slotA: Math.random() * 6.28 });
   } else { f.role = role; f.job = null; f.tx = null; }
-  floatTxt(f.x + 22, f.y - 52, 'Now a ' + (role === 'archer' ? 'Archer' : role === 'builder' ? 'Builder' : 'Farmer'), '#d6ffb0');
-  toast(`A villager became ${role === 'archer' ? 'an Archer' : 'a ' + (role === 'builder' ? 'Builder' : 'Farmer')}`, 'good');
+  const nice = role === 'archer' ? 'Archer' : role === 'builder' ? 'Builder' : role === 'miner' ? 'Miner' : 'Farmer';
+  floatTxt(f.x + 22, f.y - 52, 'Now a ' + nice, '#d6ffb0');
+  toast(`A villager became ${role === 'archer' ? 'an Archer' : 'a ' + nice}`, 'good');
 }
 function updateFolk(dt) {
   if (S.camp) {
@@ -1306,7 +1666,7 @@ function updateFolk(dt) {
       wanderAround(f, ix, iy, 64, dt, sp); continue;
     }
     if (f.role === 'builder') {
-      if (f.job && (!jobValid(f.job) || (night && !isClearJob(f.job) && !isDemoJob(f.job) && f.job.built !== 0 && !(f.job.built < 1)))) f.job = null;
+      if (f.job && (!jobValid(f.job) || (night && !isClearJob(f.job) && !isDemoJob(f.job) && !isUpgradeJob(f.job) && f.job.built !== 0 && !(f.job.built < 1)))) f.job = null;
       if (!f.job) f.job = pickBuildJob(f, night);
       const j = f.job;
       if (j) {
@@ -1316,6 +1676,9 @@ function updateFolk(dt) {
           if (isDemoJob(j)) {
             j.demoProg = Math.min(1, (j.demoProg || 0) + dt / (TUNE.demoTime || 4));
             if (j.demoProg >= 1) { finishDemo(j); f.job = null; }
+          } else if (isUpgradeJob(j)) {
+            j.prog = Math.min(1, (j.prog || 0) + dt / (TUNE.upgradeTime || 6));
+            if (j.prog >= 1) { finishUpgrade(j); f.job = null; }
           } else if (isClearJob(j)) {
             const kind = decorKind(j);
             j.prog = Math.min(1, (j.prog || 0) + dt / (TUNE.clearTime[kind] || 4));
@@ -1350,15 +1713,44 @@ function updateFolk(dt) {
             f.working = true;
             j.prog = (j.prog || 0) + dt;
             if (j.prog >= TUNE.farmEvery) {
-              j.prog -= TUNE.farmEvery; S.coins += TUNE.farmCoins; S.stats.farmCoins += TUNE.farmCoins;
-              floatTxt(j.x, j.y - 30, '+' + TUNE.farmCoins, '#ffd56a');
-              S.fx.push({ k: 'coins', x: j.x, y: j.y - 10, t: 0.8, t0: 0.8, n: TUNE.farmCoins });
+              const gained = farmCoinsOf(j);
+              j.prog -= TUNE.farmEvery; S.coins += gained; S.stats.farmCoins += gained;
+              floatTxt(j.x, j.y - 30, '+' + gained, '#ffd56a');
+              S.fx.push({ k: 'coins', x: j.x, y: j.y - 10, t: 0.8, t0: 0.8, n: gained });
             }
           }
         }
         continue;
       }
       wanderAround(f, ix + 30, iy, 50, dt, sp); continue;
+    }
+    if (f.role === 'miner') {
+      let m = f.job && f.job.type === 'mine' ? f.job : null;
+      if (m && (!(S.mines || []).includes(m) || S.regions[m.region].owner !== 'player')) {
+        if (m.miner === f) m.miner = null;
+        m = f.job = null;
+      }
+      if (!m) {
+        let bd = 1e9;
+        for (const mine of (S.mines || [])) {
+          const r = S.regions[mine.region];
+          if (!r || r.owner !== 'player') continue;
+          if (mine.miner && mine.miner !== f && S.folk.includes(mine.miner)) continue;
+          const d = dist(mine, f);
+          if (d < bd) { bd = d; m = mine; }
+        }
+        if (m) { m.miner = f; f.job = m; }
+      }
+      if (m) {
+        if (m.miner && m.miner !== f && S.folk.includes(m.miner)) { f.job = null; continue; }
+        m.miner = f;
+        const standY = m.y + (m.r || 22) + (TUNE.navPad || 10) + 6;
+        const reach = minerReach(m);
+        if (dist(f, m) > reach - 8) moveTo(f, m.x, standY, sp, dt);
+        else { moveTo(f, m.x + Math.sin(S.t * 0.4 + f.ph) * 8, standY, 10, dt); f.working = true; }
+        continue;
+      }
+      wanderAround(f, ix + 20, iy, 50, dt, sp); continue;
     }
   }
   if (S.folk.some(f => f.dead)) S.folk = S.folk.filter(f => !f.dead);
@@ -1499,6 +1891,7 @@ function damage(e, dmg) {
   } else if (e.type === 'folk') {
     const i = S.folk.indexOf(e); if (i >= 0) S.folk.splice(i, 1);
     if (e.job && e.job.farmer === e) e.job.farmer = null;
+    if (e.role === 'miner') for (const m of (S.mines || [])) if (m.miner === e) m.miner = null;
     S.stats.folkLost++; S.fx.push({ k: 'puff', x: e.x, y: e.y, t: 0.5, t0: 0.5 });
     toast(`A ${e.role} was slain`, 'bad');
   } else if (e === S.monarch) {
@@ -1512,7 +1905,7 @@ function captureRegion(r) {
   S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05 });
   let extra = '';
   if (r.bonus === 'fort') { S.buildings.push(mkBld('fort', r.x + 60, r.y + 10, r.id, 1)); extra = ' +free Encampment Fort'; }
-  if (r.bonus === 'keep') { r.core.keep = true; r.core.max = r.core.hp = TUNE.coreKeep; extra = ' +free Ruin Keep'; }
+  if (r.bonus === 'keep') { r.core.keep = true; r.core.level = 1; r.core.max = r.core.hp = TUNE.coreKeep; r.core.r = TUNE.keepR[0]; extra = ' +free Ruin Keep'; }
   r.bonus = null;
   toast(`Region captured: ${r.name}!${extra}`, 'good');
   refreshCamps();
@@ -1523,6 +1916,7 @@ function loseRegion(r) {
   S.buildings = S.buildings.filter(b => !(b.region === r.id && b.built < 1)); // unfinished scaffolds collapse
   S.stands = S.stands.filter(st => S.buildings.includes(st) || st.region !== r.id);
   for (const b of S.buildings) if (b.region === r.id) { b.owner = 'pale'; b.hp = Math.max(b.hp, b.max * 0.5); if (b.farmer) b.farmer = null; }
+  for (const m of (S.mines || [])) if (m.region === r.id) { if (m.miner && m.miner.job === m) m.miner.job = null; m.miner = null; }
   for (const a of S.archers.slice()) if (regionIdAt(a.x, a.y) === r.id && dist(a, S.monarch) > 300) S.archers.splice(S.archers.indexOf(a), 1);
   const hp = r.weakened ? 220 : 360;
   S.guardians.push({ kind: 'warden', name: 'Pale Warden', x: r.x, y: r.y, hx: r.x, hy: r.y, r: 24, hp, max: hp, dmg: 11, cd: 0, region: r.id });
@@ -1668,20 +2062,61 @@ function update(dt) {
     if (dist(g, m) < g.r + m.r + 12 && g.cd <= 0) { g.cd = 0.9; damage(m, g.dmg); S.fx.push({ k: 'hit', x: m.x, y: m.y, t: 0.2, t0: 0.2 }); if (S.over) return; }
   }
 
-  // buildings (towers)
-  for (const b of S.buildings) {
-    const spec = BLD[b.type]; if (!spec.range || b.built < 1) continue;
-    b.cd -= dt; if (b.cd > 0) continue;
-    if (b.owner === 'player') {
-      let best = null, bd = spec.range;
-      for (const u of S.undead) { const d = dist(u, b); if (d < bd) { bd = d; best = u; } }
-      if (best) { b.cd = spec.cd; S.stats.towerShots++; const ay = b.y - (b.type === 'fort' ? 40 : 30); S.fx.push({ k: 'arrow', x: b.x, y: ay, tx: best.x, ty: best.y, t: 0.48, t0: 0.48, c: '#ffd27a' }); damage(best, spec.dmg); }
+  // buildings (towers, forts, keep archer)
+  function fireTower(b, owner, spec) {
+    b.cd -= dt; if (b.cd > 0) return;
+    const shotSpr = (b.type === 'tower' && (b.level || 1) >= 2) ? getSprite('projectile-' + (b.path === 'ballista' ? 'bolt' : 'cannonball') + '-' + ((b.level || 1) >= 3 ? 'iron' : 'stone')) : null;
+    const shots = (b.type === 'fort' && owner === 'player') ? (TUNE.fortArchers[(b.level || 1) - 1] || 1) : 1;
+    const range = spec.range, dmg = spec.dmg, cd = spec.cd, aoe = spec.aoe || 0, pierce = spec.pierce || 0;
+    const ay = b.y - (b.type === 'fort' ? 40 : b.type === 'core' ? 48 : 30);
+    if (owner === 'player') {
+      const foes = S.undead.slice();
+      if (!foes.length) return;
+      foes.sort((u, v) => dist(u, b) - dist(v, b));
+      const first = foes.find(u => dist(u, b) <= range);
+      if (!first) return;
+      b.cd = cd;
+      S.stats.towerShots++;
+      if (aoe > 0) {
+        S.fx.push({ k: 'arrow', x: b.x, y: ay, tx: first.x, ty: first.y, t: 0.42, t0: 0.42, c: '#ffb15a', bolt: 1, spr: shotSpr });
+        for (const u of foes) if (dist(u, first) <= aoe) damage(u, dmg);
+      } else if (pierce > 0) {
+        const ang = Math.atan2(first.y - b.y, first.x - b.x);
+        const hit = [];
+        for (const u of foes) {
+          if (dist(u, b) > range) continue;
+          const px = u.x - b.x, py = u.y - b.y;
+          const along = px * Math.cos(ang) + py * Math.sin(ang);
+          const side = Math.abs(px * Math.sin(ang) - py * Math.cos(ang));
+          if (along > 0 && side < 22) hit.push(u);
+        }
+        hit.sort((u, v) => dist(u, b) - dist(v, b));
+        const end = hit[Math.min(hit.length, pierce) - 1] || first;
+        S.fx.push({ k: 'arrow', x: b.x, y: ay, tx: end.x, ty: end.y, t: 0.36, t0: 0.36, c: '#efe6d4', bolt: 1, spr: shotSpr });
+        for (const u of hit.slice(0, pierce)) damage(u, dmg);
+      } else {
+        for (let s = 0; s < shots; s++) {
+          const tgt = foes.filter(u => dist(u, b) <= range)[s] || first;
+          S.fx.push({ k: 'arrow', x: b.x + (s ? 6 : 0), y: ay, tx: tgt.x, ty: tgt.y, t: 0.48, t0: 0.48, c: '#ffd27a', spr: shotSpr });
+          damage(tgt, dmg);
+        }
+      }
     } else {
-      let best = null, bd = spec.range;
+      let best = null, bd = range;
       for (const a of [m].concat(S.archers)) { const d = dist(a, b); if (d < bd) { bd = d; best = a; } }
-      if (best) { b.cd = spec.cd * 1.4; S.stats.paleTowerShots++; const ay = b.y - (b.type === 'fort' ? 40 : 30); S.fx.push({ k: 'arrow', x: b.x, y: ay, tx: best.x, ty: best.y, t: 0.48, t0: 0.48, c: '#9dff7a' }); damage(best, 6); if (S.over) return; }
+      if (best) { b.cd = cd * 1.4; S.stats.paleTowerShots++; S.fx.push({ k: 'arrow', x: b.x, y: ay, tx: best.x, ty: best.y, t: 0.48, t0: 0.48, c: '#9dff7a' }); damage(best, 6); }
     }
   }
+  for (const b of S.buildings) {
+    if (b.built < 1) continue;
+    if (b.type === 'tower') fireTower(b, b.owner, towerCombat(b));
+    else if (b.type === 'fort') {
+      const lv = b.level || 1;
+      fireTower(b, b.owner, { range: TUNE.fortRange[lv - 1], dmg: TUNE.fortDmg[lv - 1], cd: BLD.fort.cd, aoe: 0, pierce: 0 });
+    }
+  }
+  const hk = homeCore();
+  if (hk && isPlayerKeep(hk) && (hk.level || 1) >= 2) fireTower(hk, 'player', { range: 220, dmg: 12, cd: 0.9, aoe: 0, pierce: 0 });
 
   updateDrops(dt);
   updateFolk(dt);
@@ -1739,7 +2174,15 @@ function update(dt) {
     }
     u.cd -= dt;
     if (u.kind === 'necro' && !S.chaos) { u.raiseT = (u.raiseT == null ? TUNE.necroRaiseEvery : u.raiseT) - dt; if (u.raiseT <= 0) { u.raiseT = TUNE.necroRaiseEvery; raiseDead(u); } }
-    if (blocked && u.cd <= 0 && u.kind !== 'necro') { u.cd = 1; damage(blocked, u.dmg * dmgK); S.fx.push({ k: 'hit', x: blocked.x, y: blocked.y, t: 0.15, t0: 0.15 }); if (S.over) return; }
+    if (blocked && u.cd <= 0 && u.kind !== 'necro') {
+      u.cd = 1; damage(blocked, u.dmg * dmgK);
+      S.fx.push({ k: 'hit', x: blocked.x, y: blocked.y, t: 0.15, t0: 0.15 });
+      if ((blocked.type === 'wall' || blocked.type === 'gate') && (blocked.level || 1) >= 3 && S.undead.includes(u)) {
+        damage(u, TUNE.wallSpikeDmg || 8);
+        S.fx.push({ k: 'hit', x: u.x, y: u.y, t: 0.12, t0: 0.12 });
+      }
+      if (S.over) return;
+    }
     if (u.kind === 'necro' && dist(u, m) < 140 && u.cd <= 0) { u.cd = 1.3; S.fx.push({ k: 'arrow', x: u.x, y: u.y - 10, tx: m.x, ty: m.y - 8, t: 0.24, t0: 0.24, c: '#c6ff8a', bolt: 1 }); damage(m, u.dmg); if (S.over) return; }
   }
 
@@ -2879,6 +3322,859 @@ function paintShimmer() {
     g.fill();
   });
 }
+
+// Placeholder upgrade sprites, keyed by art/upgrades/manifest.json ids so official art can be dropped in later.
+function getSprite(id) { return (Art.sprite && Art.sprite[id]) || null; }
+function setSprite(id, spr) { if (!Art.sprite) Art.sprite = {}; Art.sprite[id] = spr; return spr; }
+function tierWord(lv) { return lv >= 3 ? 'iron' : lv === 2 ? 'stone' : 'wood'; }
+function spriteIdFor(b) {
+  const lv = b.level || 1, tier = tierWord(lv);
+  if (b.type === 'core' || b.type === 'keep') return 'keep-' + tier;
+  if (b.type === 'tower') {
+    if (lv <= 1) return 'tower-wood';
+    return 'tower-' + (b.path || 'cannon') + '-' + tier;
+  }
+  return (b.type || 'house') + '-' + tier;
+}
+
+function registerUpgradeSprites() {
+function pal(tier) {
+  if (tier >= 3) return {
+    wall: '#dcd8d0', wallD: '#9a9590', side: '#6a6560',
+    top: '#e4e0d8', face: '#b0aaa4', ink: '#3a3834',
+    roof: '#6a6864', roofL: '#9a968e', roofD: '#3e3c38',
+    metal: '#4a4e55', metalL: '#8a9098', metalD: '#2a2c30',
+    door: '#3a3c42', trim: '#2a2c30', wood: '#8a5a32',
+    glass: '#c8d8ef'
+  };
+  if (tier >= 2) return {
+    wall: '#f3eadc', wallD: '#d4c8b4', side: '#a89886',
+    top: '#e7e2d8', face: '#c9c2b4', ink: '#7a7064',
+    roof: '#c45a3a', roofL: '#e89070', roofD: '#8a3c28',
+    metal: '#8f877c', metalL: '#c9c2b4', metalD: '#5c564c',
+    door: '#5c3a24', trim: '#6e6558', wood: '#c4925a',
+    glass: '#ffd27a'
+  };
+  return {
+    wall: '#f6ead4', wallD: '#d9c4a2', side: '#b07a45',
+    top: '#d2a56c', face: '#b07a45', ink: '#4a2e1c',
+    roof: '#d06a45', roofL: '#f2a27c', roofD: '#a34c30',
+    metal: '#6e4328', metalL: '#d2a56c', metalD: '#4a2e1c',
+    door: '#6e4328', trim: '#6e4328', wood: '#c4925a',
+    glass: '#ffd27a'
+  };
+}
+function rivets(g, pts, p) {
+  g.fillStyle = p.metalD;
+  for (const [x, y] of pts) disc(g, x, y, 0.85, p.metalD);
+  g.fillStyle = p.metalL;
+  for (const [x, y] of pts) disc(g, x - 0.25, y - 0.3, 0.4, p.metalL);
+}
+function ironBand(g, x, y, w, h, p) {
+  g.fillStyle = p.metal;
+  g.fillRect(x, y, w, h);
+  g.fillStyle = p.metalL;
+  g.fillRect(x, y, w, 1);
+  g.fillStyle = p.metalD;
+  g.fillRect(x, y + h - 1, w, 1);
+}
+function crenels(g, x, y, w, n, p, iron) {
+  const cw = w / n;
+  for (let i = 0; i < n; i++) {
+    if (i % 2 === 0) {
+      g.fillStyle = p.wall;
+      g.fillRect(x + i * cw, y - 6, cw - 0.6, 7);
+      if (iron) {
+        g.fillStyle = p.metal;
+        g.fillRect(x + i * cw, y - 7, cw - 0.6, 2.2);
+      }
+    }
+  }
+}
+function woodPlanks(g, x, y, w, h, p) {
+  g.strokeStyle = p.ink;
+  g.globalAlpha = 0.45;
+  g.lineWidth = 1;
+  g.beginPath();
+  for (let i = x + 5; i < x + w; i += 6) { g.moveTo(i, y); g.lineTo(i - 1.4, y + h); }
+  g.stroke();
+  g.globalAlpha = 1;
+}
+function stoneJoints(g, x, y, w, h, p) {
+  g.strokeStyle = p.ink;
+  g.globalAlpha = 0.58;
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(x, y + h * 0.45); g.lineTo(x + w, y + h * 0.45);
+  g.moveTo(x + w * 0.28, y); g.lineTo(x + w * 0.24, y + h * 0.45);
+  g.moveTo(x + w * 0.62, y); g.lineTo(x + w * 0.58, y + h * 0.45);
+  g.moveTo(x + w * 0.18, y + h * 0.45); g.lineTo(x + w * 0.16, y + h);
+  g.moveTo(x + w * 0.5, y + h * 0.45); g.lineTo(x + w * 0.48, y + h);
+  g.moveTo(x + w * 0.8, y + h * 0.45); g.lineTo(x + w * 0.78, y + h);
+  g.stroke();
+  g.globalAlpha = 1;
+}
+
+function paintTierKeep(tier) {
+  const p = pal(tier);
+  const w = tier === 1 ? 78 : tier === 2 ? 94 : 110;
+  const h = tier === 1 ? 100 : tier === 2 ? 120 : 140;
+  const spr = bake(w, h, g => {
+    const cx = w / 2, base = h - 4;
+    const bw = tier === 1 ? 36 : tier === 2 ? 44 : 52;
+    const bh = tier === 1 ? 44 : tier === 2 ? 54 : 64;
+    const x0 = cx - bw * 0.55, y0 = base - bh;
+    // mound
+    ell(g, cx + 2, base + 1, bw * 0.72, 8, '#cbbda8');
+    ell(g, cx - 8, base, bw * 0.42, 5.5, '#e6dcc8');
+    // side hall
+    const hx = x0 + bw + 2, hy = base - (tier === 1 ? 20 : tier === 2 ? 26 : 32);
+    const hw = tier === 1 ? 18 : tier === 2 ? 22 : 26;
+    const hh = tier === 1 ? 20 : tier === 2 ? 26 : 32;
+    poly(g, [[hx, hy], [hx + hw, hy - 5], [hx + hw, hy + hh - 5], [hx, hy + hh]], p.side);
+    poly(g, [[hx, hy], [hx + hw - 4, hy + 2], [hx + hw - 4, hy + hh], [hx, hy + hh]], p.wallD);
+    // main body
+    poly(g, [[x0, y0], [x0 + bw, y0], [x0 + bw, base], [x0, base]], p.wall);
+    poly(g, [[x0 + bw, y0], [x0 + bw + 8, y0 - 6], [x0 + bw + 8, base - 6], [x0 + bw, base]], p.side);
+    if (tier === 1) woodPlanks(g, x0, y0, bw, bh, p);
+    else stoneJoints(g, x0, y0, bw, bh, p);
+    if (tier >= 3) {
+      ironBand(g, x0, y0 + 14, bw, 5, p);
+      ironBand(g, x0, base - 10, bw, 5, p);
+      rivets(g, [[x0 + 5, y0 + 16.5], [x0 + bw / 2, y0 + 16.5], [x0 + bw - 5, y0 + 16.5],
+                 [x0 + 5, base - 7.5], [x0 + bw / 2, base - 7.5], [x0 + bw - 5, base - 7.5]], p);
+    }
+    // merlons / timber top
+    if (tier >= 2) crenels(g, x0, y0, bw, tier === 2 ? 6 : 8, p, tier >= 3);
+    else {
+      g.fillStyle = p.wall;
+      g.fillRect(x0, y0 - 8, 10, 9);
+      g.fillRect(x0 + 14, y0 - 6, 9, 7);
+    }
+    // door
+    g.fillStyle = p.door;
+    const dw = tier === 1 ? 8 : 9, dh = tier === 1 ? 14 : 16;
+    g.fillRect(x0 + bw * 0.28, base - dh, dw, dh);
+    if (tier >= 3) {
+      ironBand(g, x0 + bw * 0.28, base - dh + 4, dw, 2.2, p);
+      disc(g, x0 + bw * 0.28 + dw - 2, base - dh / 2, 1.1, '#f0c14a');
+    } else {
+      disc(g, x0 + bw * 0.28 + dw - 2, base - dh / 2, 1, '#f0c14a');
+    }
+    // window
+    g.fillStyle = p.glass;
+    g.fillRect(x0 + bw * 0.62, y0 + (tier === 1 ? 16 : 18), 6, 7);
+    g.strokeStyle = p.trim; g.lineWidth = 0.8;
+    g.beginPath();
+    g.moveTo(x0 + bw * 0.62 + 3, y0 + (tier === 1 ? 16 : 18));
+    g.lineTo(x0 + bw * 0.62 + 3, y0 + (tier === 1 ? 23 : 25));
+    g.moveTo(x0 + bw * 0.62, y0 + (tier === 1 ? 19.5 : 21.5));
+    g.lineTo(x0 + bw * 0.62 + 6, y0 + (tier === 1 ? 19.5 : 21.5));
+    g.stroke();
+    // roof over side hall
+    const ry = hy + 2;
+    poly(g, [[hx - 3, ry + 6], [hx + hw * 0.45, ry - 12], [hx + hw + 3, ry]], p.roof);
+    poly(g, [[hx + hw * 0.45, ry - 12], [hx + hw + 6, ry - 6], [hx + hw + 3, ry]], p.roofD);
+    poly(g, [[hx - 3, ry + 6], [hx + hw * 0.45, ry - 12], [hx + 6, ry - 2]], p.roofL);
+    if (tier >= 3) {
+      g.strokeStyle = p.metal; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(hx - 2, ry + 5); g.lineTo(hx + hw * 0.45, ry - 12); g.lineTo(hx + hw + 5, ry - 5); g.stroke();
+    }
+    // bushes
+    ell(g, x0 - 4, base - 10, 6, 4.4, '#5f8a3c');
+    ell(g, x0 + 4, base - 18, 4, 3.2, '#8fbc5a');
+    ell(g, hx + hw + 2, base - 2, 5, 2.6, '#a89e90');
+    // flagpole
+    const fx = x0 + 8, fy = y0 - (tier >= 2 ? 22 : 18);
+    g.fillStyle = '#5c4030';
+    g.fillRect(fx, fy, 2.6, tier >= 2 ? 24 : 20);
+    disc(g, fx + 1.3, fy, 2.2, '#f0c14a');
+    // static flag
+    g.fillStyle = '#3e74c8';
+    g.beginPath();
+    g.moveTo(fx + 2.6, fy + 1);
+    g.lineTo(fx + 22, fy + 4);
+    g.lineTo(fx + 20, fy + 13);
+    g.lineTo(fx + 2.6, fy + 12);
+    g.fill();
+    disc(g, fx + 12, fy + 7.5, 1.7, '#f0c14a');
+    // flame on annex
+    poly(g, [[hx + 6, hy + 8], [hx + 3, hy + 1], [hx + 6, hy + 3], [hx + 8, hy - 2], [hx + 10, hy + 4], [hx + 9, hy + 8]], '#ff9a3a');
+    poly(g, [[hx + 6.5, hy + 7], [hx + 5.5, hy + 3], [hx + 7, hy + 1], [hx + 8, hy + 5]], '#ffe08a');
+    // archer on L2+
+    if (tier >= 2) {
+      const ax = x0 + bw * 0.72, ay = y0 - 2;
+      g.fillStyle = '#5c4030';
+      g.fillRect(ax - 3, ay - 8, 2.4, 8);
+      g.fillRect(ax + 1, ay - 8, 2.4, 8);
+      ell(g, ax, ay - 10, 4.2, 4.6, '#6e9a4a');
+      g.fillStyle = '#3e74c8';
+      g.fillRect(ax - 3, ay - 12, 6, 1.8);
+      disc(g, ax, ay - 16.5, 2.5, '#e6b898');
+      g.fillStyle = '#5c4030';
+      g.beginPath(); g.arc(ax, ay - 16.5, 2.7, Math.PI * 1.05, Math.PI * 1.95);
+      g.quadraticCurveTo(ax + 3.2, ay - 20, ax, ay - 21);
+      g.quadraticCurveTo(ax - 3.2, ay - 20, ax - 2.6, ay - 16.5);
+      g.fill();
+      g.strokeStyle = '#6b4630'; g.lineWidth = 1.2;
+      g.beginPath(); g.arc(ax + 6, ay - 11, 5, -1.2, 1.2); g.stroke();
+      g.strokeStyle = '#f4ead8'; g.lineWidth = 0.6;
+      g.beginPath(); g.moveTo(ax + 7.2, ay - 15); g.lineTo(ax + 7.2, ay - 7); g.stroke();
+    }
+  });
+  spr.gy = h - 4;
+  return spr;
+}
+
+function paintTierHouse(tier) {
+  const p = pal(tier);
+  const w = tier === 1 ? 48 : tier === 2 ? 64 : 80;
+  const h = tier === 1 ? 52 : tier === 2 ? 66 : 80;
+  const spr = bake(w, h, g => {
+    const base = h - 2;
+    const bw = tier === 1 ? 26 : tier === 2 ? 36 : 46;
+    const bh = tier === 1 ? 20 : tier === 2 ? 26 : 32;
+    const x0 = tier === 1 ? 8 : 10;
+    const y0 = base - bh;
+    const side = tier === 1 ? 9 : 10;
+    poly(g, [[x0, y0], [x0 + bw, y0], [x0 + bw, base], [x0, base]], p.wall);
+    poly(g, [[x0 + bw, y0], [x0 + bw + side, y0 - 6], [x0 + bw + side, base - 6], [x0 + bw, base]], p.wallD);
+    if (tier === 1) {
+      g.strokeStyle = 'rgba(120,80,40,.28)'; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x0, y0 + 6); g.lineTo(x0 + bw, y0 + 6); g.moveTo(x0, y0 + 13); g.lineTo(x0 + bw, y0 + 13); g.stroke();
+    } else stoneJoints(g, x0, y0, bw, bh, p);
+    if (tier >= 3) {
+      ironBand(g, x0, y0 + 8, bw, 4, p);
+      rivets(g, [[x0 + 5, y0 + 10], [x0 + bw / 2, y0 + 10], [x0 + bw - 5, y0 + 10]], p);
+    }
+    // door
+    g.fillStyle = p.door;
+    const dw = 7, dh = tier === 1 ? 12 : 14;
+    g.fillRect(x0 + 4, base - dh, dw, dh);
+    // windows — 1, 2, then 3
+    const wins = tier;
+    const wy = y0 + (tier === 1 ? 4 : 6);
+    const start = x0 + 14;
+    for (let i = 0; i < wins; i++) {
+      const wx = start + i * (tier === 3 ? 10 : 11);
+      g.fillStyle = p.glass;
+      g.fillRect(wx, wy, 6.5, 5.5);
+      g.strokeStyle = p.trim; g.lineWidth = 0.8;
+      g.beginPath(); g.moveTo(wx + 3.2, wy); g.lineTo(wx + 3.2, wy + 5.5); g.moveTo(wx, wy + 2.7); g.lineTo(wx + 6.5, wy + 2.7); g.stroke();
+    }
+    // roof
+    const apexX = x0 + bw * 0.5, apexY = y0 - (tier === 1 ? 18 : tier === 2 ? 22 : 26);
+    poly(g, [[x0 - 4, y0 + 2], [apexX, apexY], [x0 + bw + 2, y0 + 2]], p.roof);
+    poly(g, [[apexX, apexY], [x0 + bw + side + 2, y0 - 4], [x0 + bw + 2, y0 + 2]], p.roofD);
+    poly(g, [[x0 - 4, y0 + 2], [apexX, apexY], [x0 + 8, y0 - 6]], p.roofL);
+    if (tier >= 3) {
+      g.strokeStyle = p.metal; g.lineWidth = 2.2;
+      g.beginPath(); g.moveTo(x0 - 3, y0 + 1); g.lineTo(apexX, apexY); g.lineTo(x0 + bw + side + 1, y0 - 4); g.stroke();
+    }
+    // chimney
+    const cx = x0 + bw + 2, cy = apexY + (tier === 1 ? 8 : 10);
+    g.fillStyle = tier >= 3 ? p.metal : '#8d8478';
+    g.fillRect(cx, cy, 5, 12);
+    g.fillStyle = tier >= 3 ? p.metalD : '#6e4328';
+    g.fillRect(cx + 1, cy - 2, 3, 3);
+    if (tier >= 3) rivets(g, [[cx + 2.5, cy + 4], [cx + 2.5, cy + 9]], p);
+  });
+  spr.gy = h - 2;
+  spr.smoke = { dx: (tier === 1 ? 14 : tier === 2 ? 20 : 26), dy: -(tier === 1 ? 40 : tier === 2 ? 50 : 62) };
+  return spr;
+}
+
+function paintTierWall(tier) {
+  const p = pal(tier);
+  const w = tier === 1 ? 42 : tier === 2 ? 46 : 52;
+  const h = tier === 1 ? 30 : tier === 2 ? 36 : 46;
+  const spr = bake(w, h, g => {
+    const topY = tier === 1 ? 12 : tier === 2 ? 12 : 16;
+    const faceB = h - 2;
+    poly(g, [[4, topY], [w - 6, topY - 2], [w - 10, topY + 6], [2, topY + 6]], p.top);
+    poly(g, [[2, topY + 6], [w - 10, topY + 6], [w - 10, faceB], [2, faceB]], p.face);
+    poly(g, [[w - 10, topY + 6], [w - 6, topY - 2], [w - 6, faceB - 8], [w - 10, faceB]], p.side);
+    g.strokeStyle = p.ink;
+    g.globalAlpha = 0.55;
+    g.lineWidth = 1;
+    g.beginPath();
+    if (tier === 1) {
+      for (let x = 8; x <= w - 12; x += 6) { g.moveTo(x + 2, topY); g.lineTo(x - 1, faceB); }
+    } else {
+      g.moveTo(2, topY + 14); g.lineTo(w - 10, topY + 13);
+      g.moveTo(12, topY + 6); g.lineTo(11, topY + 14);
+      g.moveTo(22, topY + 6); g.lineTo(21, topY + 14);
+      g.moveTo(8, topY + 14); g.lineTo(7, faceB);
+      g.moveTo(18, topY + 14); g.lineTo(17, faceB);
+      g.moveTo(28, topY + 13); g.lineTo(27, faceB);
+    }
+    g.stroke();
+    g.globalAlpha = 1;
+    if (tier === 1) {
+      for (let x = 4; x <= w - 12; x += 6) poly(g, [[x, topY], [x + 3, topY - 5], [x + 6, topY - 1]], p.top);
+    }
+    if (tier >= 3) {
+      ironBand(g, 2, topY + 7, w - 12, 3.4, p);
+      // spikes
+      for (let x = 6; x <= w - 14; x += 7) {
+        poly(g, [[x, topY], [x + 2.3, topY - 10], [x + 4.6, topY]], p.metal);
+        poly(g, [[x + 0.8, topY], [x + 2.3, topY - 8], [x + 2.8, topY]], p.metalL);
+      }
+      rivets(g, [[6, topY + 8.7], [16, topY + 8.7], [26, topY + 8.7], [w - 16, topY + 8.7]], p);
+    }
+    g.strokeStyle = 'rgba(255,255,255,.4)';
+    g.lineWidth = 1;
+    g.beginPath(); g.moveTo(8, topY + 1); g.lineTo(w - 12, topY - 0.6); g.stroke();
+  });
+  spr.gy = h - 4;
+  return spr;
+}
+
+function paintTierGate(tier) {
+  const p = pal(tier);
+  const w = tier === 1 ? 44 : tier === 2 ? 54 : 64;
+  const h = tier === 1 ? 38 : tier === 2 ? 50 : 62;
+  const spr = bake(w, h, g => {
+    const base = h - 4;
+    const left = 2, right = w - 2, mid = w / 2;
+    const pillarW = tier === 1 ? 8 : 10;
+    const topY = tier === 1 ? 14 : tier === 2 ? 16 : 18;
+    poly(g, [[left, topY], [left + pillarW, topY - 2], [left + pillarW, base], [left, base]], p.face);
+    poly(g, [[right - pillarW, topY - 2], [right, topY - 4], [right, base - 2], [right - pillarW, base]], p.side);
+    poly(g, [[left + pillarW, topY - 2], [right - pillarW, topY - 2], [right - pillarW, base], [left + pillarW, base]], p.face);
+    poly(g, [[left, topY], [mid, topY - 10], [right, topY - 4], [right - pillarW, topY - 2], [left + pillarW, topY - 2]], p.top);
+    poly(g, [[left + pillarW, topY - 2], [mid, topY - 6], [right - pillarW, topY - 2], [right - pillarW, topY + 4], [mid, topY + 2], [left + pillarW, topY + 4]], p.top);
+    if (tier === 1) woodPlanks(g, left + pillarW, topY + 4, right - left - pillarW * 2, base - topY - 4, p);
+    else stoneJoints(g, left, topY + 6, pillarW, base - topY - 6, p);
+    if (tier >= 3) {
+      ironBand(g, left, topY + 8, pillarW, 3.5, p);
+      ironBand(g, right - pillarW, topY + 8, pillarW, 3.5, p);
+    }
+    if (tier >= 2) {
+      // Flat gatehouse parapet with merlons sitting on it
+      const py = topY - 6;
+      poly(g, [[left, topY + 2], [right, topY], [right, py], [left, py + 2]], p.top);
+      poly(g, [[right - 2, py], [right + 3, py - 3], [right + 3, topY - 3], [right, topY]], p.side);
+      const n = 6, span = right - left - 4;
+      for (let i = 0; i < n; i++) {
+        if (i % 2) continue;
+        const x = left + 2 + i * (span / n);
+        const cw = span / n - 0.8;
+        g.fillStyle = p.wall;
+        g.fillRect(x, py - 7, cw, 8);
+        if (tier >= 3) {
+          g.fillStyle = p.metal;
+          g.fillRect(x, py - 8.5, cw, 2.2);
+        }
+      }
+    }
+    // doors
+    const woodL = p.wood, woodR = p.door;
+    const dL = left + pillarW + 1, dR = right - pillarW - 1, dT = topY + 4;
+    poly(g, [[dL, dT], [mid, dT - 1], [mid, base], [dL, base]], woodL);
+    poly(g, [[mid, dT - 1], [dR, dT], [dR, base], [mid, base]], woodR);
+    g.strokeStyle = p.ink; g.lineWidth = 1.1;
+    g.beginPath(); g.moveTo(mid, dT - 1); g.lineTo(mid, base); g.stroke();
+    if (tier >= 3) {
+      // portcullis + spikes
+      g.strokeStyle = p.metal; g.lineWidth = 1.3;
+      g.beginPath();
+      for (let x = dL + 3; x < dR; x += 5) { g.moveTo(x, dT + 1); g.lineTo(x, base - 2); }
+      for (let y = dT + 5; y < base - 4; y += 6) { g.moveTo(dL + 1, y); g.lineTo(dR - 1, y); }
+      g.stroke();
+      for (let x = dL + 3; x < dR; x += 5) {
+        poly(g, [[x - 1.4, dT + 1], [x, dT - 6], [x + 1.4, dT + 1]], p.metal);
+      }
+    } else {
+      g.fillStyle = '#f0c14a';
+      g.beginPath(); g.arc(mid - 3, (dT + base) / 2, 1.3, 0, 7); g.arc(mid + 3, (dT + base) / 2, 1.3, 0, 7); g.fill();
+    }
+    g.strokeStyle = 'rgba(255,255,255,.4)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(left + 4, topY - 4); g.lineTo(mid, topY - 9); g.lineTo(right - 4, topY - 3); g.stroke();
+  });
+  spr.gy = h - 6;
+  return spr;
+}
+
+function paintTierTowerWood() {
+  const p = pal(1);
+  const spr = bake(50, 74, g => {
+    poly(g, [[14, 56], [34, 56], [40, 50], [18, 50]], p.wallD);
+    poly(g, [[14, 56], [34, 56], [34, 62], [14, 62]], p.wall);
+    poly(g, [[34, 56], [40, 50], [40, 56], [34, 62]], p.side);
+    poly(g, [[14, 30], [34, 30], [34, 56], [14, 56]], p.wall);
+    poly(g, [[34, 30], [42, 24], [42, 50], [34, 56]], p.side);
+    poly(g, [[14, 30], [34, 30], [42, 24], [22, 24]], p.wallD);
+    woodPlanks(g, 14, 30, 20, 26, p);
+    poly(g, [[20, 56], [28, 56], [28, 46], [24, 43], [20, 46]], '#5c3a24');
+    g.fillStyle = p.wall;
+    g.fillRect(15, 24, 6, 8);
+    g.fillRect(24, 24, 6, 8);
+    poly(g, [[24, 4], [8, 26], [24, 34]], p.roof);
+    poly(g, [[24, 4], [44, 24], [24, 34]], p.roofD);
+    poly(g, [[24, 4], [8, 26], [18, 18]], p.roofL);
+    disc(g, 22, 44, 2.2, '#e6b898');
+    g.fillStyle = '#3e74c8';
+    g.fillRect(20, 45.4, 4.2, 3.2);
+    g.strokeStyle = '#6b4630';
+    g.lineWidth = 1.1;
+    g.beginPath(); g.arc(28, 45, 3.3, -1.15, 1.05); g.stroke();
+    g.strokeStyle = '#efe6d4';
+    g.lineWidth = 0.7;
+    g.beginPath(); g.moveTo(31, 42.6); g.lineTo(31, 47.6); g.stroke();
+    g.fillStyle = '#5c4030';
+    g.fillRect(23, 4, 2, 10);
+    g.fillStyle = '#3e74c8';
+    g.beginPath();
+    g.moveTo(25, 5);
+    g.lineTo(37, 7.5);
+    g.lineTo(35.5, 13);
+    g.lineTo(25, 12);
+    g.fill();
+    disc(g, 30, 9, 1.3, '#f0c14a');
+    disc(g, 24, 4, 1.6, '#f0c14a');
+  });
+  spr.gy = 58;
+  spr.flag = { dx: -1, dy: -54, w: 14, h: 8 };
+  return spr;
+}
+
+function paintTierCannon(tier) {
+  const p = pal(tier);
+  const w = tier === 2 ? 70 : 84;
+  const h = tier === 2 ? 84 : 100;
+  const spr = bake(w, h, g => {
+    const cx = w / 2, base = h - 4;
+    const bw = tier === 2 ? 32 : 40, bh = tier === 2 ? 36 : 46;
+    const x0 = cx - bw / 2 - 2, y0 = base - bh;
+    ell(g, cx, base + 1, bw * 0.7, 7, '#cbbda8');
+    poly(g, [[x0, y0], [x0 + bw, y0], [x0 + bw, base], [x0, base]], p.wall);
+    poly(g, [[x0 + bw, y0], [x0 + bw + 8, y0 - 6], [x0 + bw + 8, base - 6], [x0 + bw, base]], p.side);
+    poly(g, [[x0, y0], [x0 + bw, y0], [x0 + bw + 8, y0 - 6], [x0 + 8, y0 - 6]], p.wallD);
+    stoneJoints(g, x0, y0, bw, bh, p);
+    crenels(g, x0, y0, bw, tier === 2 ? 5 : 6, p, tier >= 3);
+    if (tier >= 3) {
+      ironBand(g, x0, y0 + 12, bw, 5, p);
+      ironBand(g, x0, base - 10, bw, 5, p);
+      rivets(g, [[x0 + 6, y0 + 14.5], [x0 + bw / 2, y0 + 14.5], [x0 + bw - 6, y0 + 14.5]], p);
+    }
+    // door
+    g.fillStyle = p.door;
+    g.fillRect(x0 + 6, base - 14, 8, 14);
+    // cannon barrel pointing right
+    const bx = x0 + bw - 2, by = y0 + bh * 0.38;
+    const bl = tier === 2 ? 22 : 28;
+    const thick = tier === 2 ? 7 : 9;
+    const barrel = tier >= 3 ? p.metal : '#6a5a48';
+    const barrelL = tier >= 3 ? p.metalL : '#8a7a64';
+    poly(g, [[bx, by], [bx + bl, by - 4], [bx + bl + 2, by + thick - 2], [bx, by + thick + 2]], barrel);
+    poly(g, [[bx, by], [bx + bl, by - 4], [bx + bl, by + 1], [bx, by + 3]], barrelL);
+    // muzzle
+    ell(g, bx + bl + 1, by + thick * 0.35, 2.4, thick * 0.55, '#1a1612');
+    ell(g, bx + bl + 0.4, by + thick * 0.3, 1.2, thick * 0.28, '#4a4038');
+    // trunnion / carriage
+    disc(g, bx + 3, by + thick, 3.2, p.metalD);
+    disc(g, bx + 3, by + thick, 2, p.metal);
+    // shot pile
+    const sx = x0 + (tier === 2 ? 16 : 20), sy = base - 6;
+    disc(g, sx, sy, tier === 2 ? 3.2 : 4, '#5c5850');
+    disc(g, sx + 6, sy - 1, tier === 2 ? 2.8 : 3.6, '#3a3834');
+    if (tier >= 3) disc(g, sx + 3, sy - 5, 3.2, '#4a4e55');
+    // highlight
+    g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x0 + 4, y0 + 2); g.lineTo(x0 + bw - 4, y0 + 2); g.stroke();
+  });
+  spr.gy = h - 4;
+  return spr;
+}
+
+function paintTierBallista(tier) {
+  const p = pal(tier);
+  const w = tier === 2 ? 62 : 74;
+  const h = tier === 2 ? 100 : 120;
+  const spr = bake(w, h, g => {
+    const cx = w / 2, base = h - 4;
+    const bw = tier === 2 ? 22 : 26, bh = tier === 2 ? 52 : 64;
+    const x0 = cx - bw / 2, y0 = base - bh;
+    ell(g, cx, base + 1, bw * 0.9, 6, '#cbbda8');
+    poly(g, [[x0, y0], [x0 + bw, y0], [x0 + bw, base], [x0, base]], p.wall);
+    poly(g, [[x0 + bw, y0], [x0 + bw + 7, y0 - 5], [x0 + bw + 7, base - 5], [x0 + bw, base]], p.side);
+    poly(g, [[x0, y0], [x0 + bw, y0], [x0 + bw + 7, y0 - 5], [x0 + 7, y0 - 5]], p.wallD);
+    stoneJoints(g, x0, y0, bw, bh, p);
+    if (tier >= 3) {
+      ironBand(g, x0, y0 + 16, bw, 4.5, p);
+      ironBand(g, x0, base - 12, bw, 4.5, p);
+      rivets(g, [[x0 + 5, y0 + 18], [x0 + bw - 5, y0 + 18]], p);
+    }
+    g.fillStyle = p.door;
+    g.fillRect(x0 + 6, base - 16, 8, 16);
+    g.fillStyle = p.glass;
+    g.fillRect(x0 + 7, y0 + 20, 6, 6);
+    crenels(g, x0, y0, bw, 4, p, tier >= 3);
+    // ballista on top
+    const tx = cx, ty = y0 - 2;
+    const arm = tier === 2 ? 18 : 24;
+    const col = tier >= 3 ? p.metal : '#8a5a32';
+    const colL = tier >= 3 ? p.metalL : '#c4925a';
+    // mount
+    g.fillStyle = col;
+    g.fillRect(tx - 3, ty - 8, 6, 10);
+    // arms
+    g.strokeStyle = col; g.lineWidth = tier === 2 ? 2.4 : 3;
+    g.beginPath();
+    g.moveTo(tx - arm, ty - 10); g.quadraticCurveTo(tx, ty - 4, tx + arm, ty - 10);
+    g.stroke();
+    g.strokeStyle = colL; g.lineWidth = 1.2;
+    g.beginPath();
+    g.moveTo(tx - arm + 1, ty - 11); g.quadraticCurveTo(tx, ty - 5, tx + arm - 1, ty - 11);
+    g.stroke();
+    // bowstring
+    g.strokeStyle = '#efe6d4'; g.lineWidth = 0.8;
+    g.beginPath(); g.moveTo(tx - arm, ty - 10); g.lineTo(tx, ty - 6); g.lineTo(tx + arm, ty - 10); g.stroke();
+    // bolt
+    const bl = tier === 2 ? 22 : 30;
+    g.strokeStyle = tier >= 3 ? p.metalD : '#5c4030'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(tx - 4, ty - 7); g.lineTo(tx + bl, ty - 16); g.stroke();
+    poly(g, [[tx + bl, ty - 16], [tx + bl - 5, ty - 19], [tx + bl - 4, ty - 13]], tier >= 3 ? p.metalL : '#d4cbbd');
+    // winch
+    disc(g, tx, ty - 5, 2.4, col);
+    disc(g, tx, ty - 5, 1.2, colL);
+  });
+  spr.gy = h - 4;
+  return spr;
+}
+
+function paintTierFarm(tier) {
+  const p = pal(tier);
+  const w = tier === 1 ? 64 : tier === 2 ? 78 : 94;
+  const h = tier === 1 ? 40 : tier === 2 ? 52 : 64;
+  const spr = bake(w, h, g => {
+    const soil = tier >= 3 ? '#8a6238' : '#b88858';
+    const soilD = tier >= 3 ? '#6e4a28' : '#a87448';
+    poly(g, [[6, 16], [w - 12, 8], [w - 4, h - 14], [14, h - 6]], soil);
+    poly(g, [[10, 18], [w - 16, 12], [w - 10, h - 16], [16, h - 10]], soilD);
+    g.strokeStyle = '#7a5430'; g.lineWidth = 1.3;
+    for (let i = 0; i < 4 + tier; i++) {
+      g.beginPath(); g.moveTo(12 + i * 2, 18 + i * 3); g.lineTo(w - 18 + i, 12 + i * 2.4); g.stroke();
+    }
+    const rows = 2 + tier, cols = 6 + tier;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const x = 14 + c * ((w - 28) / cols), y = 16 + r * ((h - 28) / rows) + c * 0.3;
+        if (tier >= 3) {
+          ell(g, x, y, 1.7, 3.6, '#e2b14a');
+          ell(g, x, y + 2.4, 1.2, 1.7, '#c4922a');
+        } else if (tier === 2) {
+          ell(g, x, y, 1.5, 3.0, '#d4a63a');
+          ell(g, x, y - 1.2, 1, 1.2, '#b6d46e');
+        } else {
+          ell(g, x, y, 1.6, 2.4, '#7eac52');
+          ell(g, x, y - 1.2, 1, 1.2, '#b6d46e');
+        }
+      }
+    }
+    // posts
+    const posts = [[6, 16], [w - 12, 8], [w - 4, h - 14], [14, h - 6]];
+    for (const [x, y] of posts) {
+      g.fillStyle = tier >= 3 ? p.metalD : '#5c3a24';
+      g.fillRect(x - 1.2, y - (tier === 1 ? 7 : 9), tier >= 3 ? 3 : 2.4, tier === 1 ? 8 : 10);
+      if (tier >= 3) {
+        g.fillStyle = p.metal;
+        g.fillRect(x - 1.6, y - 10, 3.8, 2.2);
+      }
+    }
+    g.strokeStyle = tier >= 3 ? p.metal : (tier === 2 ? '#c9c2b4' : '#c4925a');
+    g.lineWidth = tier >= 3 ? 1.6 : 1.2;
+    g.beginPath();
+    g.moveTo(6, 12); g.lineTo(w - 12, 4); g.lineTo(w - 4, h - 18); g.lineTo(14, h - 10); g.closePath();
+    g.stroke();
+    if (tier >= 3) {
+      const sx = w - 26, sy = 28;
+      poly(g, [[sx, sy], [sx + 12, sy - 2], [sx + 12, sy + 12], [sx, sy + 14]], '#c9c2b4');
+      poly(g, [[sx + 12, sy - 2], [sx + 16, sy - 5], [sx + 16, sy + 9], [sx + 12, sy + 12]], '#8f877c');
+      poly(g, [[sx - 2, sy], [sx + 8, sy - 8], [sx + 16, sy - 5], [sx + 12, sy - 2], [sx, sy]], '#6a6864');
+      g.fillStyle = '#4a4e55';
+      g.fillRect(sx + 3, sy + 4, 5, 8);
+    }
+  });
+  spr.gy = h - 8;
+  return spr;
+}
+
+function paintTierFort(tier) {
+  const p = pal(tier);
+  const w = tier === 1 ? 78 : tier === 2 ? 94 : 112;
+  const h = tier === 1 ? 86 : tier === 2 ? 102 : 120;
+  const spr = bake(w, h, g => {
+    const base = h - 6;
+    // palisade or stone curtain
+    if (tier === 1) {
+      for (let i = 0; i < 10; i++) {
+        const x = 2 + i * 7.4;
+        g.fillStyle = i % 2 ? '#7a5432' : '#c4925a';
+        g.fillRect(x, base - 28, 6.2, 28);
+        disc(g, x + 3.1, base - 28, 3.3, i % 2 ? '#7a5432' : '#c4925a');
+        g.fillStyle = '#5c3a24';
+        g.fillRect(x + 2, base - 28, 1.2, 28);
+      }
+    } else {
+      const cw = w - 16;
+      const ch = tier === 2 ? 28 : 32;
+      poly(g, [[8, base - ch], [8 + cw - 10, base - ch], [8 + cw - 10, base], [8, base]], p.face);
+      poly(g, [[8 + cw - 10, base - ch], [8 + cw, base - ch - 6], [8 + cw, base - 6], [8 + cw - 10, base]], p.side);
+      stoneJoints(g, 8, base - ch, cw - 10, ch, p);
+      crenels(g, 8, base - ch, cw - 10, tier === 2 ? 8 : 10, p, tier >= 3);
+      if (tier >= 3) ironBand(g, 8, base - 12, cw - 10, 4, p);
+    }
+    const bx = tier === 1 ? 24 : 28, by = base - (tier === 1 ? 42 : 46);
+    const bw = tier === 1 ? 34 : tier === 2 ? 42 : 50;
+    const bh = tier === 1 ? 20 : 24;
+    poly(g, [[bx, by], [bx + bw, by], [bx + bw, by + bh], [bx, by + bh]], p.wall);
+    poly(g, [[bx + bw, by], [bx + bw + 8, by - 6], [bx + bw + 8, by + bh - 6], [bx + bw, by + bh]], p.side);
+    const roofY = by - (tier === 1 ? 18 : 22);
+    poly(g, [[bx - 2, by], [bx + bw * 0.45, roofY], [bx + bw + 2, by + 2]], p.roof);
+    poly(g, [[bx - 2, by], [bx + bw * 0.45, roofY], [bx + 10, by - 8]], p.roofL);
+    poly(g, [[bx + bw * 0.45, roofY], [bx + bw + 10, by - 4], [bx + bw + 2, by + 2]], p.roofD);
+    if (tier >= 3) {
+      g.strokeStyle = p.metal; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(bx - 1, by); g.lineTo(bx + bw * 0.45, roofY); g.lineTo(bx + bw + 8, by - 3); g.stroke();
+    }
+    // left tower
+    const tx = 8, tw = 16, th = tier === 1 ? 32 : 40;
+    g.fillStyle = p.wall;
+    g.fillRect(tx, base - th, tw, th);
+    g.fillStyle = p.side;
+    g.fillRect(tx + tw, base - th + 4, 5, th - 4);
+    poly(g, [[tx + tw / 2, base - th - 16], [tx + tw + 8, base - th + 2], [tx - 4, base - th + 2]], p.roof);
+    poly(g, [[tx + tw / 2, base - th - 16], [tx - 4, base - th + 2], [tx + 4, base - th - 4]], p.roofL);
+    // door + archer
+    g.fillStyle = p.door;
+    g.fillRect(bx + 12, by + bh - 16, 12, 16);
+    disc(g, bx + 22, by + bh - 8, 1.1, '#f0c14a');
+    disc(g, tx + 8, base - th + 14, 2.2, '#e6b898');
+    g.fillStyle = '#3e74c8';
+    g.fillRect(tx + 6, base - th + 15.5, 4, 3);
+    if (tier >= 2) {
+      disc(g, bx + 8, by + 8, 2.2, '#e6b898');
+      g.fillStyle = '#3e74c8';
+      g.fillRect(bx + 6, by + 9.5, 4, 3);
+    }
+    if (tier >= 3) {
+      ironBand(g, tx, base - th + 10, tw, 3.5, p);
+      rivets(g, [[tx + 4, base - th + 11.7], [tx + tw - 4, base - th + 11.7]], p);
+    }
+    g.fillStyle = '#5c4030';
+    g.fillRect(bx + bw * 0.55, roofY - 6, 2.2, 14);
+  });
+  spr.gy = h - 8;
+  return spr;
+}
+
+function paintTierMine(kind) {
+  const iron = kind === 'iron';
+  const w = 86, h = 70;
+  const spr = bake(w, h, g => {
+    const hill = iron ? '#5c534c' : '#a89886';
+    const hillL = iron ? '#8a7a70' : '#d4cbbd';
+    const hillD = iron ? '#3a342e' : '#6e6558';
+    const ore = iron ? '#8a3c28' : '#c9c2b4';
+    const oreL = iron ? '#c45a3a' : '#e7e2d8';
+    // hill
+    poly(g, [[4, 62], [14, 28], [40, 14], [70, 24], [82, 62]], hill);
+    poly(g, [[14, 30], [40, 16], [52, 28], [28, 40]], hillL);
+    if (iron) {
+      // rust veins
+      g.strokeStyle = oreL; g.lineWidth = 2; g.globalAlpha = 0.7;
+      g.beginPath(); g.moveTo(22, 44); g.lineTo(30, 28); g.lineTo(36, 36); g.stroke();
+      g.beginPath(); g.moveTo(48, 50); g.lineTo(58, 32); g.stroke();
+      g.globalAlpha = 1;
+    }
+    // cut face / entrance
+    poly(g, [[28, 62], [32, 36], [50, 34], [58, 62]], hillD);
+    poly(g, [[34, 58], [36, 40], [48, 39], [52, 58]], '#1a1612');
+    // headframe so it reads as a mine, not a tent
+    const frame = iron ? '#4a4e55' : '#8a5a32';
+    const frameL = iron ? '#8a9098' : '#c4925a';
+    g.fillStyle = frame;
+    g.fillRect(32, 18, 3.2, 44);
+    g.fillRect(50, 18, 3.2, 44);
+    g.fillRect(31, 18, 23, 4);
+    g.fillStyle = frameL;
+    g.fillRect(32, 18, 3.2, 1.4);
+    g.fillRect(50, 18, 3.2, 1.4);
+    g.fillRect(31, 18, 23, 1.4);
+    // cross brace
+    g.strokeStyle = frame; g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(34, 22); g.lineTo(51, 40);
+    g.moveTo(52, 22); g.lineTo(35, 40);
+    g.stroke();
+    // winch beam and bucket
+    g.fillStyle = frame;
+    g.fillRect(40, 14, 14, 3);
+    g.strokeStyle = '#2a1c10'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(52, 17); g.lineTo(52, 28); g.stroke();
+    g.fillStyle = iron ? '#6a4030' : '#c4925a';
+    g.fillRect(49, 28, 6, 5);
+    g.fillStyle = iron ? '#4a2e1c' : '#8a5a32';
+    g.fillRect(49, 32, 6, 1.4);
+    if (iron) {
+      disc(g, 33.6, 20, 1.4, '#2a2c30');
+      disc(g, 51.6, 20, 1.4, '#2a2c30');
+      disc(g, 33.6, 40, 1.4, '#2a2c30');
+      disc(g, 51.6, 40, 1.4, '#2a2c30');
+    }
+    // piles
+    if (iron) {
+      poly(g, [[60, 62], [66, 50], [76, 54], [80, 62]], '#3a342e');
+      poly(g, [[64, 60], [68, 52], [74, 56]], ore);
+      ell(g, 70, 58, 5, 3, oreL);
+      // ingots
+      g.fillStyle = '#6a4030';
+      g.fillRect(62, 58, 8, 3);
+      g.fillStyle = '#a34c30';
+      g.fillRect(63, 55, 7, 3);
+    } else {
+      // cut blocks
+      g.fillStyle = '#d4cbbd';
+      g.fillRect(60, 52, 10, 7);
+      g.fillStyle = '#e7e2d8';
+      g.fillRect(62, 48, 9, 6);
+      g.fillStyle = '#8f877c';
+      g.fillRect(70, 54, 8, 6);
+      g.fillStyle = '#c9c2b4';
+      g.fillRect(72, 50, 7, 5);
+    }
+    // ground gravel
+    ell(g, 20, 62, 8, 2.4, iron ? '#4a4038' : '#b7ad9e');
+    ell(g, 48, 64, 14, 2.8, iron ? '#3a342e' : '#c9c2b4');
+  });
+  spr.gy = 64;
+  return spr;
+}
+
+  function paintLockIcon() {
+    return bake(24, 28, g => {
+      g.strokeStyle = '#2a1c10'; g.lineWidth = 3.2;
+      g.beginPath(); g.arc(12, 11, 5, Math.PI, 0); g.stroke();
+      g.fillStyle = '#2a1c10';
+      if (g.roundRect) g.roundRect(4, 11, 16, 15, 2.2); else g.fillRect(4, 11, 16, 15);
+      g.fill();
+      g.fillStyle = '#e6c27a';
+      if (g.roundRect) { g.beginPath(); g.roundRect(5.2, 12.2, 13.6, 12.6, 1.6); g.fill(); }
+      else g.fillRect(5.2, 12.2, 13.6, 12.6);
+      disc(g, 12, 18, 1.8, '#2a1c10');
+      g.fillStyle = '#2a1c10'; g.fillRect(11.2, 18, 1.6, 5);
+    });
+  }
+  function paintMiner(pose) {
+    const spr = bake(30, 34, g => {
+      const walk = pose === 'walk-0' || pose === 'walk-1' || pose === 'walk0' || pose === 'walk1';
+      const step = (pose === 'walk-1' || pose === 'walk1') ? 2.4 : (pose === 'walk-0' || pose === 'walk0') ? -1.2 : 0;
+      const work = String(pose).indexOf('work') === 0;
+      g.fillStyle = '#5c4030';
+      g.fillRect(10, 24 + (walk && step < 0 ? -1 : 0), 3, 8);
+      g.fillRect(16, 24 + (walk && step > 0 ? -1 : 0), 3, 8);
+      g.fillStyle = '#3a2a1c';
+      g.fillRect(10, 31, 3.2, 1.6);
+      g.fillRect(16, 31, 3.2, 1.6);
+      ell(g, 14, 19.5, 6.3, 6.5, '#8a9098');
+      ell(g, 16.4, 20.6, 3, 4.6, '#4a4e55');
+      g.fillStyle = '#2a2c30'; g.fillRect(11, 21, 8, 1.6);
+      disc(g, 14, 11, 3.5, '#e6b898');
+      g.fillStyle = '#4a4e55';
+      g.beginPath(); g.arc(14, 11, 3.8, Math.PI * 1.05, Math.PI * 1.95);
+      g.quadraticCurveTo(18, 6, 14, 5); g.quadraticCurveTo(10, 6, 10.2, 11); g.fill();
+      disc(g, 15.5, 11.2, 0.55, '#2a1c10');
+      const ang = pose === 'work-0' || pose === 'work0' ? -1.1 : pose === 'work-1' || pose === 'work1' ? -0.2 : pose === 'work-2' || pose === 'work2' ? 0.9 : -0.6;
+      const hx = 18 + Math.cos(ang) * 6, hy = 16 + Math.sin(ang) * 6;
+      g.strokeStyle = '#6b4630'; g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(18, 18); g.lineTo(hx, hy); g.stroke();
+      g.save(); g.translate(hx, hy); g.rotate(ang);
+      poly(g, [[-2, -1], [6, -3], [6, 1], [-2, 2]], '#8a9098');
+      g.fillStyle = '#4a4e55'; g.fillRect(4, -4, 3.2, 6);
+      g.restore();
+    });
+    spr.gy = 33;
+    return spr;
+  }
+  function paintPickIcon() {
+    return bake(16, 18, g => {
+      g.strokeStyle = '#2a1c10'; g.lineWidth = 3.2;
+      g.beginPath(); g.moveTo(5, 16); g.lineTo(11, 5); g.stroke();
+      g.strokeStyle = '#e2b15a'; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(5.2, 15.6); g.lineTo(10.6, 5.4); g.stroke();
+      g.fillStyle = '#2a1c10';
+      g.beginPath(); g.moveTo(7, 4); g.quadraticCurveTo(14, 2, 15, 8); g.quadraticCurveTo(12, 5, 9, 7); g.closePath(); g.fill();
+      g.fillStyle = '#c9c2b4';
+      g.beginPath(); g.moveTo(8, 4.6); g.quadraticCurveTo(13, 3.2, 13.8, 7); g.quadraticCurveTo(11.4, 5.2, 9.2, 6.4); g.closePath(); g.fill();
+    });
+  }
+  function paintShot(kind, iron) {
+    if (kind === 'cannonball') {
+      return bake(12, 12, g => {
+        disc(g, 6, 6.4, 4.6, iron ? '#2a2c30' : '#4a4038');
+        disc(g, 6, 5.6, 4.2, iron ? '#4a4e55' : '#6a5a48');
+        disc(g, 4.6, 4.6, 1.4, 'rgba(255,255,255,.35)');
+      });
+    }
+    return bake(18, 8, g => {
+      const col = iron ? '#4a4e55' : '#8a5a32';
+      poly(g, [[1, 4], [14, 2.2], [17, 4], [14, 5.8]], col);
+      poly(g, [[13, 1.4], [17.5, 4], [13, 6.6]], iron ? '#8a9098' : '#d4cbbd');
+    });
+  }
+
+  setSprite('keep-wood', paintTierKeep(1));
+  setSprite('keep-stone', paintTierKeep(2));
+  setSprite('keep-iron', paintTierKeep(3));
+  setSprite('house-wood', paintTierHouse(1));
+  setSprite('house-stone', paintTierHouse(2));
+  setSprite('house-iron', paintTierHouse(3));
+  setSprite('wall-wood', paintTierWall(1));
+  setSprite('wall-stone', paintTierWall(2));
+  setSprite('wall-iron', paintTierWall(3));
+  setSprite('gate-wood', paintTierGate(1));
+  setSprite('gate-stone', paintTierGate(2));
+  setSprite('gate-iron', paintTierGate(3));
+  setSprite('farm-wood', paintTierFarm(1));
+  setSprite('farm-stone', paintTierFarm(2));
+  setSprite('farm-iron', paintTierFarm(3));
+  setSprite('fort-wood', paintTierFort(1));
+  setSprite('fort-stone', paintTierFort(2));
+  setSprite('fort-iron', paintTierFort(3));
+  setSprite('tower-wood', paintTierTowerWood());
+  setSprite('tower-cannon-stone', paintTierCannon(2));
+  setSprite('tower-cannon-iron', paintTierCannon(3));
+  setSprite('tower-ballista-stone', paintTierBallista(2));
+  setSprite('tower-ballista-iron', paintTierBallista(3));
+  setSprite('projectile-cannonball-stone', paintShot('cannonball', false));
+  setSprite('projectile-cannonball-iron', paintShot('cannonball', true));
+  setSprite('projectile-bolt-stone', paintShot('bolt', false));
+  setSprite('projectile-bolt-iron', paintShot('bolt', true));
+  const ms = paintTierMine('stone'), mi = paintTierMine('iron');
+  setSprite('mine-stone-idle', ms);
+  setSprite('mine-stone-working', ms);
+  setSprite('mine-iron-idle', mi);
+  setSprite('mine-iron-working', mi);
+  setSprite('miner-idle', paintMiner('idle'));
+  setSprite('miner-walk-0', paintMiner('walk-0'));
+  setSprite('miner-walk-1', paintMiner('walk-1'));
+  setSprite('miner-work-0', paintMiner('work-0'));
+  setSprite('miner-work-1', paintMiner('work-1'));
+  setSprite('miner-work-2', paintMiner('work-2'));
+  setSprite('icon-lock', paintLockIcon());
+  Art.tool.pick = paintPickIcon();
+  setSprite('tool-pickaxe', Art.tool.pick);
+  Art.stand.pick = paintStand('pick');
+  setSprite('stand-pickaxe', Art.stand.pick);
+  Art.folk.miner = [
+    getSprite('miner-idle'), getSprite('miner-walk-0'), getSprite('miner-walk-1'),
+    getSprite('miner-work-0'), getSprite('miner-work-1'), getSprite('miner-work-2')
+  ];
+}
+
+
 function buildArt() {
   Art.shadow = paintShadow();
   Art.coin = paintCoin();
@@ -2945,6 +4241,7 @@ function buildArt() {
   g.fillStyle = grd;
   g.fillRect(0, 0, s, s);
   Art.light = { c, w: s, h: s };
+  registerUpgradeSprites();
 }
 
 function buildDecor() {
@@ -3296,6 +4593,13 @@ function gateOpen(b) {
 }
 function buildingSpr(b) {
   const pale = b.owner === 'pale';
+  if (!pale && !b.tool) {
+    const spr = getSprite(spriteIdFor(b));
+    if (spr) {
+      if (b.type === 'gate' && gateOpen(b) && (b.level || 1) <= 1 && Art.gateO) return Art.gateO;
+      return spr;
+    }
+  }
   if (b.type === 'wall') {
     const wood = (((b.x * 3 + b.y * 5) | 0) & 1) === 0;
     return pale ? (wood ? Art.wallWP : Art.wallSP) : (wood ? Art.wallW : Art.wallS);
@@ -3346,9 +4650,11 @@ function drawBuilding(b) {
     const pale = b.owner === 'pale';
     const worked = b.farmer && S.folk.includes(b.farmer);
     const prog = b.prog || 0;
-    const spr = pale ? Art.farm.pale : (worked && prog > TUNE.farmEvery * 0.55) ? Art.farm.ripe : (worked || prog > 0.8) ? Art.farm.growing : Art.farm.tilled;
+    const tier = !pale && getSprite(spriteIdFor(b));
+    const spr = pale ? Art.farm.pale : tier || ((worked && prog > TUNE.farmEvery * 0.55) ? Art.farm.ripe : (worked || prog > 0.8) ? Art.farm.growing : Art.farm.tilled);
     blit(spr, b.x, b.y + 6);
     if (b.hp < b.max) bar(b.x, b.y + 12, 36, b.hp / b.max, pale ? '#7dce6a' : '#e2a23a');
+    if (b.upgGroup && b.upgGroup.prog > 0) bar(b.x, b.y + 20, 36, b.upgGroup.prog, '#8fd06a');
     if (!pale && !(b.farmer && S.folk.includes(b.farmer))) placeTag('Needs a Farmer', b.x, b.y + 22, 11, '#ffe6b0', '#e6c27a');
     if (b.demo) drawDemoMark(b);
     return;
@@ -3381,10 +4687,20 @@ function drawBuilding(b) {
   }
   flashAt(b.x, b.y - 12, b.r * 0.7, b.r * 0.8, b.flash);
   if (b.hp < b.max) bar(b.x, b.y + 8, 36, b.hp / b.max, pale ? '#7dce6a' : '#e2a23a');
+  if (b.upgGroup && b.upgGroup.prog > 0) bar(b.x, b.y + 16, 36, b.upgGroup.prog, '#8fd06a');
   if (b.demo) drawDemoMark(b);
 }
 function drawCore(k) {
-  const x = k.x, y = k.y, keep = !!k.keep;
+  const x = k.x, y = k.y, keep = !!(k.keep || isPlayerKeep(k));
+  const keepSpr = keep ? getSprite(spriteIdFor(k)) : null;
+  if (keepSpr) {
+    shadow(x, y + 2, k.r || 22, 8);
+    blit(keepSpr, x, y);
+    flashAt(x, y - 16, 12, 16, k.flash);
+    bar(x, y + 12, 48, k.hp / k.max, '#5b93e0');
+    if (k.upgGroup && k.upgGroup.prog > 0) bar(x, y + 20, 48, k.upgGroup.prog, '#8fd06a');
+    return;
+  }
   shadow(x, y + 2, keep ? 22 : 14, keep ? 8 : 5);
   if (keep) {
     ell(ctx, x + 2, y + 2, 26, 9, '#cbbda8');
@@ -3465,7 +4781,7 @@ function drawFolk(f) {
   const mot = actorMotion(f);
   const set = Art.folk[f.role] || Art.folk.villager;
   let idx = mot.walking ? 1 + (mot.fr & 1) : 0;
-  if (f.working && (f.role === 'builder' || f.role === 'farmer')) idx = 3 + ((S.t * (f.role === 'builder' ? 8 : 6)) | 0) % 3;
+  if (f.working && (f.role === 'builder' || f.role === 'farmer' || f.role === 'miner')) idx = 3 + ((S.t * (f.role === 'builder' ? 8 : f.role === 'miner' ? 7 : 6)) | 0) % 3;
   else if (f.role === 'villager' && f.stand && Math.hypot(f.x - f.stand.x, f.y - f.stand.y) < 24) idx = 3;
   let bob = mot.bob;
   if (f.working && f.role === 'builder') bob += Math.abs(Math.sin(S.t * 9)) * -1.2;
@@ -3545,6 +4861,132 @@ function drawWallGhosts() {
     ctx.beginPath(); ctx.moveTo(wallDrag.x0, wallDrag.y0); ctx.lineTo(wallDrag.x1, wallDrag.y1); ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
+  }
+}
+
+function drawMine(m) {
+  if (!m) return;
+  const working = !!minerAtMine(m);
+  const id = 'mine-' + m.kind + (working ? '-working' : '-idle');
+  const spr = getSprite(id);
+  shadow(m.x, m.y + 2, 20, 7);
+  if (spr) blit(spr, m.x, m.y);
+  const r = S.regions[m.region];
+  const owned = !!(r && r.owner === 'player');
+  const label = (m.kind === 'stone' ? 'Stone' : 'Iron') + ' mine' + (working ? ' — working' : owned ? ' — no miner' : ' — wild');
+  placeTag(label, m.x, m.y + 22, 11, working ? '#d6ffb0' : '#ffe6b0', working ? '#8fd06a' : '#e6c27a');
+}
+function nearbyUpgradeTargets() {
+  if (!S || !S.monarch) return [];
+  const range = TUNE.upgradeMarkRange || 170;
+  const m = S.monarch;
+  const seen = new Set();
+  const out = [];
+  const consider = [];
+  for (const b of S.buildings) {
+    if (b.owner !== 'player' || b.built < 1 || b.tool || b.demo) continue;
+    if (isStandType(b.type)) continue;
+    consider.push(b);
+  }
+  for (const r of owned()) if (r.core && isPlayerKeep(r.core)) consider.push(r.core);
+  for (const b of consider) {
+    if (dist(b, m) > range + (b.r || 16)) continue;
+    const members = upgradeMembers(b);
+    const lead = members[0];
+    if (!lead || seen.has(lead) || (lead.upgGroup && seen.has(lead.upgGroup))) continue;
+    seen.add(lead);
+    if (lead.upgGroup) seen.add(lead.upgGroup);
+    const cx = members.reduce((s, o) => s + o.x, 0) / members.length;
+    const cy = members.reduce((s, o) => s + o.y, 0) / members.length;
+    out.push({ lead, members, x: cx, y: cy });
+  }
+  return out;
+}
+function drawUpgradeBadge(wx, wy, paid, cost, locked, reason) {
+  const p = w2s(wx, wy);
+  const size = 16, pad = 7, ih = 16;
+  const lockSpr = locked ? getSprite('icon-lock') : null;
+  const txt = locked ? (reason || 'Locked') : ((paid || 0) + '/' + cost);
+  ctx.font = `800 ${locked ? 13 : size}px "Segoe UI", system-ui, sans-serif`;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const tw = ctx.measureText(txt).width;
+  const iconW = locked || Art.coin ? ih : 0;
+  const w = pad + iconW + (iconW ? 5 : 0) + tw + pad, h = 24;
+  const x = Math.round(clamp(p.x - w / 2, 6, vw - w - 6));
+  const y = Math.round(clamp(p.y - h / 2, TOP_CHROME + 6, vh - BOT_CHROME - h - 6));
+  rrPath(ctx, x, y, w, h, 8);
+  ctx.fillStyle = 'rgba(28,20,14,.88)';
+  ctx.fill();
+  ctx.lineWidth = 2.2;
+  ctx.strokeStyle = locked ? '#e6c27a' : (paid >= cost ? '#8ee0b0' : '#f0c14a');
+  ctx.stroke();
+  if (locked && lockSpr && lockSpr.c) ctx.drawImage(lockSpr.c, x + pad, y + (h - ih) / 2, ih, ih);
+  else if (!locked && Art.coin) ctx.drawImage(Art.coin.c, x + pad, y + (h - ih) / 2, ih, ih);
+  ctx.fillStyle = locked ? '#ffe6b0' : (paid >= cost ? '#e9fff2' : '#fff6e4');
+  ctx.fillText(txt, x + pad + iconW + (iconW ? 5 : 0), y + h / 2 + 0.5);
+}
+function drawTowerPathButtons(lead, wx, wy, gate) {
+  const p = w2s(wx, wy);
+  const bw = 136, bh = 58, gap = 12;
+  let x0 = p.x - (bw * 2 + gap) / 2;
+  let y0 = p.y - bh / 2;
+  x0 = clamp(x0, 8, vw - (bw * 2 + gap) - 8);
+  y0 = clamp(y0, TOP_CHROME + 8, vh - BOT_CHROME - bh - 8);
+  const locked = !!(gate && !gate.ok && gate.lock !== 'path');
+  const reason = locked ? gate.reason : '';
+  if (reason) drawUpgradeBadge(wx, wy - 36, 0, 0, true, reason);
+  const paths = [
+    { path: 'cannon', label: 'Cannon', sub: 'Slow area damage' },
+    { path: 'ballista', label: 'Ballista', sub: 'Long range, pierces' },
+  ];
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < 2; i++) {
+    const x = x0 + i * (bw + gap), y = y0;
+    rrPath(ctx, x, y, bw, bh, 12);
+    ctx.fillStyle = 'rgba(28,20,14,.92)';
+    ctx.fill();
+    ctx.lineWidth = 2.6;
+    ctx.strokeStyle = locked ? '#c9b488' : '#f0c14a';
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.font = '800 18px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#fff6e4';
+    ctx.fillText(paths[i].label, x + bw / 2, y + 22);
+    ctx.font = '700 11px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#e6c27a';
+    ctx.fillText(paths[i].sub, x + bw / 2, y + 40);
+    if (locked) {
+      const lockSpr = getSprite('icon-lock');
+      if (lockSpr && lockSpr.c) ctx.drawImage(lockSpr.c, x + bw - 22, y + 6, 16, 18);
+    }
+    S._choiceBtns.push({ x, y, w: bw, h: bh, b: lead, path: paths[i].path, locked: !!locked, reason });
+  }
+}
+function drawUpgradeChrome() {
+  S._choiceBtns = [];
+  if (!S || S.over || S.build) return;
+  for (const t of nearbyUpgradeTargets()) {
+    const lead = t.lead;
+    const g = lead.upgGroup;
+    const lift = lead.type === 'wall' || lead.type === 'gate' ? 28 : (lead.type === 'core' ? 70 : lead.type === 'farm' ? 40 : 52);
+    if (g && g.prog > 0) continue;
+    const needPath = lead.type === 'tower' && (lead.level || 1) === 1 && !lead.path;
+    if (needPath) {
+      const gate = upgradeNeed({ type: lead.type, level: lead.level, path: 'cannon', _pickPath: 'cannon' });
+      drawTowerPathButtons(lead, t.x, t.y - lift, gate);
+      continue;
+    }
+    if (g && g.paid > 0) {
+      drawUpgradeBadge(t.x, t.y - lift, g.paid, g.cost, false, '');
+      continue;
+    }
+    const need = upgradeNeed(lead);
+    if (!need.ok) {
+      if (need.lock === 'max') continue;
+      drawUpgradeBadge(t.x, t.y - lift, 0, 0, true, need.reason);
+      continue;
+    }
+    drawUpgradeBadge(t.x, t.y - lift, 0, need.cost, false, '');
   }
 }
 function drawWallCostBadge() {
@@ -3683,7 +5125,9 @@ function drawFxItem(f) {
     ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(x, y); ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.translate(x, y); ctx.rotate(ang);
-    if (f.bolt) {
+    if (f.spr && f.spr.c) {
+      ctx.drawImage(f.spr.c, -f.spr.w / 2, -f.spr.h / 2, f.spr.w, f.spr.h);
+    } else if (f.bolt) {
       ctx.fillStyle = f.c || '#c6ff8a';
       ctx.beginPath(); ctx.arc(0, 0, 4.2, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#f4fff0';
@@ -3931,6 +5375,7 @@ function render() {
   for (const d of S.drops) if (vis(d.x, d.y)) pushP(d.y + 0.5, 'drop', d);
   if (S.camp && vis(S.camp.x, S.camp.y)) pushP(S.camp.y, 'camp', S.camp);
   for (const u of S.undead) if (vis(u.x, u.y)) pushP(u.y, 'und', u);
+  for (const mine of (S.mines || [])) if (vis(mine.x, mine.y)) pushP(mine.y, 'mine', mine);
   pushP(S.monarch.y, 'mon', S.monarch);
   for (let i = 1; i < pileN; i++) {
     const it = pile[i]; let j = i - 1;
@@ -3950,6 +5395,7 @@ function render() {
       else if (it.k === 'folk') drawFolk(it.a);
       else if (it.k === 'stand') drawStand(it.a);
       else if (it.k === 'drop') drawDrop(it.a);
+      else if (it.k === 'mine') drawMine(it.a);
       else if (it.k === 'camp') drawCamp(it.a);
       else drawMonarch();
     } catch (err) {
@@ -4030,6 +5476,7 @@ function render() {
   // Tool stock is shown as racked sprites on the stand, not a count bubble.
   // Payment is taken from the purse on the mark tap; no lingering 0/1 count badge.
   drawWallCostBadge();
+  drawUpgradeChrome();
   for (const g of S.guardians) {
     const e = edgeOf(g.x, g.y);
     if (e.on) continue;
@@ -4169,6 +5616,11 @@ window.__bc = {
   },
   timeScale: 1, TUNE, dropCoin, workers, housingCap, toggleRally, debug: DEBUG,
   rand, pickWaveSide, waveEntryPoint, startNight,
+  keepLevel, isPlayerKeep, houseSlotsOf, farmCoinsOf, upgradeCostTo, materialReady, mineOwned,
+  upgradeNeed, wallConnected, upgradeMembers, beginUpgrade, payUpgrade, cancelUpgrade,
+  tryUpgradeTap, upgradeTargetAt, nearestPayableUpgrade, finishUpgrade, applyTier, spriteIdFor, getSprite,
+  get mines() { return S && S.mines; },
+  get choiceBtns() { return S && S._choiceBtns; },
 };
 
 buildArt();
