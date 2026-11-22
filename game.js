@@ -380,6 +380,7 @@ function renderLoadout() {
 }
 
 function showOverlay(id) {
+  closeInspect();
   for (const k of ['title', 'loadout', 'over']) {
     const el = $(k);
     if (el) el.hidden = k !== id;
@@ -515,6 +516,11 @@ const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const $ = id => document.getElementById(id);
 let dpr = 1, vw = 0, vh = 0, baseScale = 1, zoom = TUNE.zoomStart, scale = 1;
 let lookX = null, lookY = null, lookFree = false, pinch = null;
+// Per-player UI only (not simulation state). A later multiplayer Endless
+// mode can give each client their own inspect sheet without freezing the world.
+const PUI = { inspectId: null, inspectSig: '' };
+let nextBid = 1;
+function allocBid() { return 'b' + (nextBid++); }
 const pts = new Map();
 function applyScale() {
   const zMin = TUNE.zoomMin, zMax = TUNE.zoomMax;
@@ -575,6 +581,8 @@ function newGame(opts) {
     monarch: { x: 0, y: 0, r: 16, hp: 120, max: 120, cd: 0, target: null, speed: 190, vx: 0, vy: 0, face: 0 },
     nightK: 0, waveSide: null,
   };
+  nextBid = 1;
+  closeInspect();
   S.seeded = seeded;
   S.playRng = seeded ? mulberry((seed ^ 0xa5a5a5a5) >>> 0) : null;
   const N = 7;
@@ -626,7 +634,7 @@ function newGame(opts) {
   toast('Start with your Builder and House. Order a Hammer stand, then drop coins on vagrants and stands', '');
 }
 function mkBld(type, x, y, rid, built) {
-  const b = { type, x, y, r: 16, hp: 1, max: 1, owner: 'player', region: rid, cd: 0, built: built ? 1 : 0, level: 1, path: null };
+  const b = { id: allocBid(), type, x, y, r: 16, hp: 1, max: 1, owner: 'player', region: rid, cd: 0, built: built ? 1 : 0, level: 1, path: null };
   applyTier(b, true);
   if (!built) b.hp = Math.ceil(b.max * 0.15);
   return b;
@@ -705,7 +713,7 @@ function refreshCamps() {
   if (S.camp) settleVagrants();
 }
 function mkRegion(id, x, y) { return { id, x, y, name: NAMES[id], owner: 'wild', core: null, bonus: null, weakened: false }; }
-function mkCore(r, hp) { return { type: 'core', x: r.x, y: r.y, r: 20, hp, max: hp, region: r.id, keep: false, level: 1 }; }
+function mkCore(r, hp) { return { id: allocBid(), type: 'core', x: r.x, y: r.y, r: 20, hp, max: hp, region: r.id, keep: false, level: 1 }; }
 const owned = () => S.regions.filter(r => r.owner === 'player');
 
 // ---------- toasts / hint ----------
@@ -810,7 +818,12 @@ const endPtr = e => {
 cv.addEventListener('pointerup', endPtr); cv.addEventListener('pointercancel', endPtr);
 addEventListener('keydown', e => {
   keys[e.key.toLowerCase()] = true;
-  if (e.key === 'Escape' && S) { if (S.sel) { e.preventDefault(); clearSel(); } else if (S.build) { e.preventDefault(); setBuild(null); } }
+  if (e.key === 'Escape' && (PUI.inspectId || (S && (S.sel || S.build)))) {
+    e.preventDefault();
+    if (PUI.inspectId) closeInspect();
+    else if (S && S.sel) clearSel();
+    else if (S && S.build) setBuild(null);
+  }
   if (e.key === 'n' && DEBUG) skipPhase();
   if (e.key === ' ' && !e.repeat) dropCoin();
 });
@@ -856,6 +869,18 @@ $('btnEndless').addEventListener('click', () => startEndless());
 $('btnChallenge').addEventListener('click', () => openLoadout());
 $('btnLoadoutBack').addEventListener('click', () => showTitle());
 $('btnStartChallenge').addEventListener('click', () => startChallenge());
+$('btnInspectClose').addEventListener('click', () => closeInspect());
+$('inspectActions').addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn || btn.disabled || !PUI.inspectId) return;
+  const act = btn.dataset.act;
+  if (act === 'upgrade') requestUpgrade(PUI.inspectId, {});
+  else if (act === 'cannon' || act === 'ballista') requestUpgrade(PUI.inspectId, { path: act });
+  else if (act === 'cancel') requestUpgrade(PUI.inspectId, { cancel: true });
+  else if (act === 'stock') requestStock(PUI.inspectId);
+  else if (act === 'gate') requestSwapGate(PUI.inspectId);
+  renderInspect(true);
+});
 
 function setBuild(t) {
   if (!S) return;
@@ -898,7 +923,7 @@ function followCam(dt) {
   lookY += (m.y - lookY) * k;
 }
 function showMenu(on) {
-  if (on) refreshBuildMenu();
+  if (on) { closeInspect(); refreshBuildMenu(); }
   $('buildMenu').hidden = !on;
   $('btnBuild').classList.toggle('open', !!on);
 }
@@ -1000,7 +1025,13 @@ function onTap(sx, sy) {
   if (S.build === 'clear') return tryMarkDecor(w.x, w.y, true);
   if (S.build === 'demolish') return tryMarkDemo(w.x, w.y, true);
   if (S.build) return tryPlace(S.build, w.x, w.y);
-  if (S._choiceBtns && S._choiceBtns.length && tryUpgradeTap(w.x, w.y, sx, sy)) return;
+  const bld = buildingAt(w.x, w.y, Math.max(44, 64 / scale));
+  if (bld) {
+    if (S.sel) clearSel();
+    openInspect(bld);
+    return;
+  }
+  if (PUI.inspectId) { closeInspect(); return; }
   const hit = workerAt(w.x, w.y);
   // Prefer a tree/rock under the finger unless a worker is already selected (then a worker tap switches/deselects).
   const decor = decorAt(w.x, w.y, Math.max(28, 48 / scale));
@@ -1014,8 +1045,6 @@ function onTap(sx, sy) {
       return;
     }
   }
-  // A worker send must not swallow a coin-slot / path-button tap on a nearby upgrade.
-  if (tryUpgradeTap(w.x, w.y, sx, sy)) return;
   if (S.sel) { sendWorker(S.sel.u, w.x, w.y); return; }
   if (tryMarkDecor(w.x, w.y, false)) return;
   // tap an enemy to focus it
@@ -1430,14 +1459,15 @@ function mineOwned(kind) {
 }
 function upgradeNeed(target, levelTo) {
   if (!target) return { ok: false, lock: 'none', reason: 'No target' };
-  if ((target.level || 1) >= 3) return { ok: false, lock: 'max', reason: 'Already iron' };
+  if ((target.level || 1) >= 3) return { ok: false, lock: 'max', reason: 'Already iron', levelTo: 3 };
   const lv = levelTo || (target.level || 1) + 1;
-  if (lv > 3) return { ok: false, lock: 'max', reason: 'Already iron' };
+  if (lv > 3) return { ok: false, lock: 'max', reason: 'Already iron', levelTo: lv };
   if (target.type === 'tower' && lv >= 2 && !target.path && !target._pickPath) {
-    return { ok: false, lock: 'path', reason: 'Choose Cannon or Ballista' };
+    return { ok: false, lock: 'path', reason: 'Choose Cannon or Ballista', levelTo: lv };
   }
   const isKeep = isPlayerKeep(target);
-  if (!isKeep && lv > keepLevel()) return { ok: false, lock: 'keep', reason: 'Need Keep Lv ' + lv };
+  const mat = lv === 2 ? 'stone' : 'iron';
+  if (!isKeep && lv > keepLevel()) return { ok: false, lock: 'keep', reason: 'Need Keep Lv ' + lv, levelTo: lv, mat };
   const choiceWhy = (function () {
     if (!hasCurse('choice')) return null;
     if (isPlayerKeep(target) && optionLocked('upgrade-keep')) return 'Keep upgrades are locked this run';
@@ -1452,10 +1482,9 @@ function upgradeNeed(target, levelTo) {
     }
     return null;
   })();
-  if (choiceWhy) return { ok: false, lock: 'choice', reason: choiceWhy };
-  const mat = lv === 2 ? 'stone' : 'iron';
-  if (!mineOwned(mat)) return { ok: false, lock: 'mine', reason: 'Need an owned ' + mat + ' mine' };
-  if (!materialReady(mat)) return { ok: false, lock: 'miner', reason: 'Need a miner at the ' + mat + ' mine' };
+  if (choiceWhy) return { ok: false, lock: 'choice', reason: choiceWhy, levelTo: lv, mat };
+  if (!mineOwned(mat)) return { ok: false, lock: 'mine', reason: 'Need an owned ' + mat + ' mine', mat, levelTo: lv };
+  if (!materialReady(mat)) return { ok: false, lock: 'miner', reason: 'Need a miner at the ' + mat + ' mine', mat, levelTo: lv };
   return { ok: true, lock: null, reason: '', mat, levelTo: lv, cost: upgradeCostTo(lv, target) };
 }
 function wallConnected(start) {
@@ -1559,7 +1588,7 @@ function placeMines(rnd) {
     const d = 70 + rnd() * 50;
     const x = clamp(r.x + Math.cos(ang) * d, 80, W - 80);
     const y = clamp(r.y + Math.sin(ang) * d, 80, H - 80);
-    S.mines.push({ type: 'mine', kind, x, y, r: TUNE.mineR || 22, region: r.id, miner: null });
+    S.mines.push({ id: allocBid(), type: 'mine', kind, x, y, r: TUNE.mineR || 22, region: r.id, miner: null });
   }
 }
 function upgradeTargetAt(x, y, rad) {
@@ -1665,6 +1694,378 @@ function tryUpgradeTap(x, y, sx, sy) {
   return true;
 }
 
+function buildingById(id) {
+  if (!S || id == null) return null;
+  for (const b of S.buildings) if (b.id === id) return b;
+  for (const r of S.regions) if (r.core && r.core.id === id) return r.core;
+  for (const m of S.mines || []) if (m.id === id) return m;
+  return null;
+}
+function buildingAlive(b) {
+  if (!S || !b) return false;
+  if (b.type === 'mine') return !!(S.mines && S.mines.includes(b));
+  if (b.type === 'core') return !!(S.regions[b.region] && S.regions[b.region].core === b);
+  return S.buildings.includes(b);
+}
+function inspectables() {
+  if (!S) return [];
+  const out = [];
+  for (const b of S.buildings) out.push(b);
+  for (const r of S.regions) if (r.core && !S.buildings.includes(r.core)) out.push(r.core);
+  for (const m of S.mines || []) out.push(m);
+  return out;
+}
+function buildingAt(x, y, rad) {
+  const pt = { x, y };
+  let best = null, bd = rad;
+  for (const b of inspectables()) {
+    const d = dist(b, pt) - (b.r || 16);
+    if (d < bd) { bd = d; best = b; }
+  }
+  return best;
+}
+function inspectTarget() { return buildingById(PUI.inspectId); }
+function tierLabel(lv) { return lv >= 3 ? 'Iron' : lv === 2 ? 'Stone' : 'Wood'; }
+function inspectNameOf(b) {
+  if (!b) return 'Building';
+  if (b.type === 'mine') return (b.kind === 'iron' ? 'Iron' : 'Stone') + ' mine';
+  if (b.type === 'core' || b.type === 'keep') return isPlayerKeep(b) ? 'Keep' : (b.owner === 'pale' ? 'Pale banner' : 'Banner');
+  if (b.type === 'tower' && b.path === 'cannon') return 'Cannon tower';
+  if (b.type === 'tower' && b.path === 'ballista') return 'Ballista tower';
+  if (b.tool) return NICE[b.tool] || 'Tool stand';
+  const n = NICE[b.type] || b.type;
+  return b.owner === 'pale' ? ('Pale ' + n) : n;
+}
+function inspectReason(need) {
+  if (!need || need.ok) return '';
+  const mat = need.mat || 'stone';
+  if (need.lock === 'keep') return 'Keep must be level ' + (need.levelTo || 2);
+  if (need.lock === 'mine') return 'Needs an owned ' + mat + ' mine';
+  if (need.lock === 'miner') return 'Needs a ' + mat + ' mine with a miner';
+  if (need.lock === 'path') return 'Choose Cannon or Ballista';
+  if (need.lock === 'max') return 'Already iron';
+  if (need.lock === 'busy') return 'A builder is already working';
+  return need.reason || 'Locked';
+}
+function inspectCanAct(b) {
+  return !!(b && b.owner !== 'pale' && (b.type === 'core' ? isPlayerKeep(b) : b.type === 'mine' ? false : true));
+}
+function inspectStatsOf(b) {
+  const rows = [];
+  const push = (k, v) => rows.push({ k, v });
+  if (b.type === 'mine') {
+    const r = S.regions[b.region];
+    const owned = !!(r && r.owner === 'player');
+    const working = !!minerAtMine(b);
+    push('Status', working ? 'Miner working' : owned ? 'No miner' : 'Wild land');
+    push('Region', (r && r.name) || ('Land ' + b.region));
+    return rows;
+  }
+  if ((b.built || 0) < 1 && b.type !== 'core') {
+    push('Status', 'Under construction');
+    push('Progress', Math.round((b.built || 0) * 100) + '%');
+  }
+  if (b.max) push('Health', Math.max(0, Math.ceil(b.hp)) + ' / ' + b.max);
+  const lv = b.level || 1;
+  if (b.type === 'house') push('Workers housed', String(houseSlotsOf(b)));
+  if (isPlayerKeep(b)) {
+    if (TUNE.keepSlots) push('Housing', String(TUNE.keepSlots));
+    if (lv >= 2) push('Keep archer', 'Guarding');
+  }
+  if (b.type === 'farm') {
+    push('Pays', farmCoinsOf(b) + ' coin' + (farmCoinsOf(b) === 1 ? '' : 's') + ' per tick');
+    const farmed = !!(b.farmer && S.folk.includes(b.farmer));
+    push('Farmer', farmed ? 'Working' : 'Needs a Farmer');
+  }
+  if (b.type === 'tower') {
+    const c = towerCombat(b);
+    push('Range', String(c.range));
+    push('Damage', String(c.dmg));
+    push('Shot time', c.cd + 's');
+    if (c.aoe) push('Area', String(c.aoe));
+    if (c.pierce) push('Pierce', String(c.pierce));
+    if (!b.path && lv <= 1) push('Armament', 'Archer');
+  }
+  if (b.type === 'fort') {
+    const i = Math.max(0, Math.min(2, lv - 1));
+    push('Archers', String((TUNE.fortArchers && TUNE.fortArchers[i]) || 1));
+    push('Range', String((TUNE.fortRange && TUNE.fortRange[i]) || 220));
+    push('Damage', String((TUNE.fortDmg && TUNE.fortDmg[i]) || 13));
+  }
+  if (b.type === 'wall' || b.type === 'gate') {
+    const line = wallConnected(b);
+    if (line.length > 1) push('Connected line', line.length + ' segments');
+    if (lv >= 3) push('Spikes', (TUNE.wallSpikeDmg || 8) + ' damage');
+  }
+  if (b.tool) {
+    const stock = rackedToolCount(b);
+    push('Tools stocked', stock + ' / ' + TUNE.standMax);
+    if ((b.paid || 0) > 0) push('Partial payment', (b.paid || 0) + ' / ' + toolStockCost(b.tool));
+  }
+  if (b.upgGroup && b.upgGroup.prog > 0) push('Upgrade', Math.round(b.upgGroup.prog * 100) + '%');
+  else if (b.upgGroup && b.upgGroup.paid > 0) push('Upgrade paid', b.upgGroup.paid + ' / ' + b.upgGroup.cost);
+  if (b.demo) push('Demolish', 'Marked');
+  return rows;
+}
+function inspectSprite(b) {
+  if (!b) return null;
+  if (b.type === 'mine') {
+    const working = !!minerAtMine(b);
+    return getSprite('mine-' + b.kind + (working ? '-working' : '-idle')) || null;
+  }
+  if ((b.built || 0) < 1 && b.type !== 'core' && Art.scaffold) return Art.scaffold[b.built < 0.33 ? 0 : b.built < 0.66 ? 1 : 2] || buildingSpr(b);
+  return buildingSpr(b) || (isPlayerKeep(b) ? getSprite(spriteIdFor(b)) : null);
+}
+function paintInspectPortrait(b) {
+  const c = $('inspectArt');
+  if (!c) return;
+  const g = c.getContext('2d');
+  const w = c.width, h = c.height;
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = '#2a2118';
+  g.fillRect(0, 0, w, h);
+  const spr = inspectSprite(b);
+  if (!spr || !spr.c) return;
+  const sc = Math.min((w - 20) / spr.w, (h - 18) / spr.h);
+  g.save();
+  g.translate(w / 2, h - 10);
+  g.scale(sc, sc);
+  g.drawImage(spr.c, -spr.w / 2, -spr.h);
+  g.restore();
+}
+function inspectActionSig(b) {
+  if (!b) return '';
+  const g = b.upgGroup;
+  const need = (b.type !== 'mine' && !b.tool && ((b.built >= 1) || b.type === 'core') && b.owner !== 'pale')
+    ? upgradeNeed(b) : {};
+  const line = (b.type === 'wall' || b.type === 'gate') ? wallConnected(b).length : 0;
+  return [b.id, b.type, b.level || 1, b.path || '', b._pickPath || '', b.built || 0, b.owner || '',
+    g && g.paid, g && g.cost, g && Math.round((g.prog || 0) * 20), b.tools, b.paid, S && S.coins,
+    need.lock, need.reason, need.cost, line, !!b.demo].join('|');
+}
+
+// Discrete upgrade command (ready to send over the network later; no networking now).
+function requestUpgrade(buildingId, option) {
+  option = option || {};
+  if (!S || S.over) return { ok: false, reason: 'No game' };
+  const target = buildingById(buildingId);
+  if (!target || !buildingAlive(target)) return { ok: false, reason: 'No building' };
+  if (target.owner === 'pale') return { ok: false, reason: 'That building is not yours' };
+  if (target.type === 'mine' || target.tool || isStandType(target.type) && target.tool) return { ok: false, reason: 'Cannot upgrade this' };
+  if ((target.built || 0) < 1 && target.type !== 'core') return { ok: false, reason: 'Still under construction' };
+  const members = upgradeMembers(target);
+  const lead = members[0];
+  if (!lead) return { ok: false, reason: 'No building' };
+  if (option.cancel) {
+    if (lead.upgGroup && lead.upgGroup.prog <= 0) { cancelUpgrade(lead.upgGroup); return { ok: true, cancelled: true }; }
+    return { ok: false, reason: 'Nothing to cancel' };
+  }
+  if (lead.upgGroup && lead.upgGroup.prog > 0) return { ok: false, lock: 'busy', reason: 'A builder is already working' };
+  const path = option.path || lead.path || lead._pickPath || null;
+  if (path && lead.type === 'tower') lead._pickPath = path;
+  const need = upgradeNeed(lead, (lead.level || 1) + 1);
+  if (!need.ok) {
+    toast(inspectReason(need) || need.reason, 'bad');
+    return need;
+  }
+  const started = beginUpgrade(members, need.levelTo, path);
+  if (!started.ok) { toast(inspectReason(started) || started.reason, 'bad'); return started; }
+  const g = started.group;
+  if (g.paid >= g.cost) { toast('A Builder is already on the way', 'good'); return { ok: true, group: g }; }
+  const remain = g.cost - g.paid;
+  if (S.coins < remain) { toast('Need ' + remain + ' coins', 'bad'); return { ok: false, lock: 'coins', reason: 'Need ' + remain + ' coins' }; }
+  S.coins -= remain;
+  payUpgrade(g, remain);
+  return { ok: true, group: g };
+}
+function requestStock(buildingId) {
+  if (!S || S.over) return { ok: false, reason: 'No game' };
+  const st = buildingById(buildingId);
+  if (!st || !st.tool || st.built < 1) return { ok: false, reason: 'No stand' };
+  if (st.owner === 'pale') return { ok: false, reason: 'That building is not yours' };
+  if ((st.tools || 0) >= TUNE.standMax) return { ok: false, reason: 'Stand is full' };
+  const cost = toolStockCost(st.tool);
+  const remain = cost - (st.paid || 0);
+  if (remain <= 0) return { ok: false, reason: 'Already stocked' };
+  if (S.coins < remain) { toast('Need ' + remain + ' coins', 'bad'); return { ok: false, lock: 'coins', reason: 'Need ' + remain + ' coins' }; }
+  S.coins -= remain;
+  st.paid = (st.paid || 0) + remain;
+  floatTxt(st.x + 28, st.y - 70, '-' + remain, '#ffb0a0');
+  if (st.paid >= cost) {
+    st.paid = 0; st.tools++; S.stats.tools++;
+    floatTxt(st.x + 28, st.y - 70, TOOL[st.tool].label + ' ready!', '#d6ffb0');
+    toast(`${TOOL[st.tool].label} bought — an idle villager will take it`, 'good');
+  }
+  return { ok: true };
+}
+function requestSwapGate(buildingId) {
+  if (!S || S.over) return { ok: false, reason: 'No game' };
+  const wall = buildingById(buildingId);
+  if (!wall || wall.type !== 'wall' || wall.owner !== 'player') return { ok: false, reason: 'Not a wall' };
+  const out = swapWallForGate(wall);
+  return out ? { ok: true } : { ok: false };
+}
+
+function closeInspect() {
+  PUI.inspectId = null;
+  PUI.inspectSig = '';
+  const el = $('inspect');
+  if (el) el.hidden = true;
+}
+function openInspect(b) {
+  if (!b || !b.id) return;
+  showMenu(false);
+  PUI.inspectId = b.id;
+  PUI.inspectSig = '';
+  const el = $('inspect');
+  if (el) el.hidden = false;
+  renderInspect(true);
+}
+function renderInspect(force) {
+  const el = $('inspect');
+  if (!el) return;
+  const b = inspectTarget();
+  if (!b || !buildingAlive(b)) { closeInspect(); return; }
+  const sig = inspectActionSig(b);
+  const name = inspectNameOf(b);
+  $('inspectName').textContent = name;
+  const lv = b.level || 1;
+  let levelTxt = '';
+  if (b.type === 'mine') levelTxt = (b.kind === 'iron' ? 'Iron' : 'Stone');
+  else if ((b.built || 0) < 1 && b.type !== 'core') levelTxt = 'Under construction';
+  else if (b.owner === 'pale') levelTxt = (b.type === 'core' ? 'Pale Host' : (tierLabel(lv) + ' · Pale Host'));
+  else levelTxt = tierLabel(lv) + ' · Level ' + lv;
+  $('inspectLevel').textContent = levelTxt;
+  const stats = $('inspectStats');
+  stats.textContent = '';
+  for (const row of inspectStatsOf(b)) {
+    const li = document.createElement('li');
+    const a = document.createElement('span'); a.textContent = row.k;
+    const v = document.createElement('span'); v.textContent = row.v;
+    li.appendChild(a); li.appendChild(v);
+    stats.appendChild(li);
+  }
+  paintInspectPortrait(b);
+  if (!force && sig === PUI.inspectSig) return;
+  PUI.inspectSig = sig;
+  const lock = $('inspectLock');
+  const acts = $('inspectActions');
+  acts.textContent = '';
+  const addBtn = (label, act, opt) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.act = act;
+    if (opt && opt.path) btn.dataset.path = opt.path;
+    if (opt && opt.disabled) btn.disabled = true;
+    if (opt && opt.cls) btn.className = opt.cls;
+    btn.appendChild(document.createTextNode(label));
+    if (opt && opt.sub) {
+      const s = document.createElement('span');
+      s.className = 'sub';
+      s.textContent = opt.sub;
+      btn.appendChild(s);
+    }
+    acts.appendChild(btn);
+    return btn;
+  };
+  if (b.type === 'mine' || b.owner === 'pale' || ((b.built || 0) < 1 && b.type !== 'core')) {
+    lock.hidden = true;
+    lock.textContent = '';
+    return;
+  }
+  if (b.tool) {
+    lock.hidden = true;
+    if ((b.tools || 0) >= TUNE.standMax) {
+      lock.hidden = false;
+      lock.textContent = 'Stand is full';
+    } else {
+      const remain = toolStockCost(b.tool) - (b.paid || 0);
+      addBtn('Stock a ' + TOOL[b.tool].label + ' — ' + remain, 'stock');
+    }
+    return;
+  }
+  if (b.type === 'wall' && b.owner === 'player' && !hasCurse('nowalls') && !optionLocked('gate')) {
+    const fee = Math.max(0, buildCost('gate') - buildCost('wall'));
+    addBtn('Swap for a Gate — ' + fee, 'gate', { cls: 'alt' });
+  }
+  const members = upgradeMembers(b);
+  const lead = members[0] || b;
+  const g = lead.upgGroup;
+  if (g && g.prog > 0) {
+    lock.hidden = true;
+    return;
+  }
+  if (g && g.paid > 0 && g.prog <= 0) {
+    lock.hidden = true;
+    addBtn('Cancel upgrade — refund ' + g.paid, 'cancel', { cls: 'ghost' });
+    const remain = g.cost - g.paid;
+    if (remain > 0) addBtn('Pay remaining — ' + remain, 'upgrade');
+    return;
+  }
+  const needPath = lead.type === 'tower' && (lead.level || 1) === 1 && !lead.path;
+  if (needPath) {
+    const paths = [
+      { path: 'cannon', label: 'Cannon', sub: 'Slow area damage' },
+      { path: 'ballista', label: 'Ballista', sub: 'Long range, pierces' },
+    ];
+    let lockTxt = '';
+    for (const pth of paths) {
+      const probe = Object.assign({}, lead, { _pickPath: pth.path, path: null });
+      const need = upgradeNeed(probe, 2);
+      const pathLock = optionLocked('upgrade-tower-' + pth.path);
+      const blocked = pathLock || (!need.ok && need.lock !== 'path');
+      const why = pathLock ? 'God of Choice locked this path' : inspectReason(need);
+      if (blocked && why) lockTxt = why;
+      const cost = need.cost || upgradeCostTo(2, lead);
+      addBtn((blocked ? why : (pth.label + ' — ' + cost)), pth.path, {
+        path: pth.path, disabled: blocked, cls: 'alt', sub: pth.sub
+      });
+    }
+    if (lockTxt && paths.every(pth => optionLocked('upgrade-tower-' + pth.path) || true)) {
+      // keep a visible reason when both are blocked for the same non-path gate
+      const probe = Object.assign({}, lead, { _pickPath: 'cannon' });
+      const need = upgradeNeed(probe, 2);
+      if (!need.ok && need.lock !== 'path') {
+        lock.hidden = false;
+        lock.textContent = inspectReason(need);
+      } else lock.hidden = true;
+    } else lock.hidden = true;
+    return;
+  }
+  if ((lead.level || 1) >= 3) {
+    lock.hidden = true;
+    return;
+  }
+  const need = upgradeNeed(lead);
+  const next = tierLabel(need.levelTo || ((lead.level || 1) + 1));
+  const nLine = (lead.type === 'wall' || lead.type === 'gate') ? members.length : 0;
+  if (!need.ok) {
+    lock.hidden = false;
+    lock.textContent = inspectReason(need);
+    const label = nLine > 1 ? ('Upgrade line (' + nLine + ') to ' + next) : ('Upgrade to ' + next);
+    addBtn(label, 'upgrade', { disabled: true, sub: inspectReason(need) });
+    return;
+  }
+  lock.hidden = true;
+  const label = nLine > 1
+    ? ('Upgrade line (' + nLine + ') to ' + next + ' — ' + need.cost)
+    : ('Upgrade to ' + next + ' — ' + need.cost);
+  addBtn(label, 'upgrade');
+}
+function syncInspect() {
+  if (!PUI.inspectId) {
+    const el = $('inspect');
+    if (el && !el.hidden) el.hidden = true;
+    return;
+  }
+  if (!S || S.over) { closeInspect(); return; }
+  const b = inspectTarget();
+  if (!b || !buildingAlive(b) || (b.hp != null && b.type !== 'mine' && b.hp <= 0)) { closeInspect(); return; }
+  const el = $('inspect');
+  if (el) el.hidden = false;
+  renderInspect(false);
+}
+
 function dropCoin() {
   if (!S || S.over) return false;
   const m = S.monarch;
@@ -1677,8 +2078,6 @@ function dropCoin() {
 function claimTarget(d) {
   let best = null, bd = TUNE.dropRange;
   if (S.regions[0].owner === 'player') for (const st of S.stands) if (st.owner === 'player' && st.built >= 1 && st.tools < TUNE.standMax) { const dd = dist(st, d); if (dd < bd) { bd = dd; best = st; } }
-  const up = nearestPayableUpgrade(d, bd);
-  if (up) { best = up; bd = dist(up, d) - (up.r || 16); }
   const free = workers() < housingCap();
   d.noHouse = false;
   for (const f of S.folk) if (f.role === 'vagrant') {
@@ -2487,6 +2886,7 @@ function gameOver(why) {
   }
   $('over').hidden = false;
   clearToasts();
+  closeInspect();
   $('bar').hidden = true; showMenu(false); if (S) S.dropHold = false;
   $('hint').textContent = '';
 }
@@ -2503,6 +2903,7 @@ function challengeVictory() {
   $('btnMenu').hidden = false;
   $('over').hidden = false;
   clearToasts();
+  closeInspect();
   $('bar').hidden = true; showMenu(false); S.dropHold = false;
   $('hint').textContent = '';
 }
@@ -5677,6 +6078,7 @@ function drawTowerPathButtons(lead, wx, wy, gate) {
   }
 }
 function drawUpgradeChrome() {
+  return; // v22: upgrades and lock reasons live on the building screen, not the map
   if (!S || S.over || S.build) return;
   for (const t of nearbyUpgradeTargets()) {
     const lead = t.lead;
@@ -6298,6 +6700,7 @@ function frame(now) {
   const steps = Math.max(1, Math.min(40, (window.__bc && window.__bc.timeScale) | 0));
   tickSel();
   for (let i = 0; i < steps && !S.over; i++) update(dt);
+  syncInspect();
   render(); drawHud();
   requestAnimationFrame(frame);
 }
@@ -6344,6 +6747,8 @@ window.__bc = {
   keepLevel, isPlayerKeep, houseSlotsOf, farmCoinsOf, upgradeCostTo, materialReady, mineOwned,
   upgradeNeed, wallConnected, upgradeMembers, beginUpgrade, payUpgrade, cancelUpgrade,
   tryUpgradeTap, upgradeTargetAt, nearestPayableUpgrade, finishUpgrade, applyTier, spriteIdFor, getSprite,
+  buildingAt, buildingById, openInspect, closeInspect, requestUpgrade, requestStock, requestSwapGate, inspectTarget,
+  get inspectId() { return PUI.inspectId; },
   get mines() { return S && S.mines; },
   get choiceBtns() { return S && S._choiceBtns; },
   get visibleLabels() { return S && S._visibleLabels; },
