@@ -382,13 +382,525 @@ function renderLoadout() {
   $('loadoutGoal').textContent = 'Survive ' + n + ' nights';
 }
 
+// ---------- Endless account / cloud (v24) ----------
+// Public API only. Challenge never calls this. No secrets in the client.
+const BC_API = 'https://boundless-crown-api.pages.dev';
+const SESSION_KEY = 'bc-endless-session';
+const CLOUD = {
+  api: BC_API,
+  token: null,
+  kingdom: null,
+  world: null,
+  offline: false,
+  playingOffline: false,
+  forceOffline: false,
+  lastError: '',
+  lastSaveOk: false,
+  saving: false,
+  dirty: false,
+  lastSaveAt: 0,
+};
+function apiBase() { return (window.__bc && window.__bc._apiBase) || CLOUD.api || BC_API; }
+function isEndlessCloud() { return !!(CLOUD.token && S && S.mode === 'endless' && !CLOUD.playingOffline); }
+function loadSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (s && s.token) {
+      CLOUD.token = s.token;
+      CLOUD.kingdom = s.kingdom || null;
+      CLOUD.world = s.world || null;
+    }
+  } catch (e) {}
+}
+function persistSession() {
+  try {
+    if (!CLOUD.token) { sessionStorage.removeItem(SESSION_KEY); return; }
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+      token: CLOUD.token,
+      kingdom: CLOUD.kingdom,
+      world: CLOUD.world,
+    }));
+  } catch (e) {}
+}
+function clearSession() {
+  CLOUD.token = null;
+  CLOUD.kingdom = null;
+  CLOUD.world = null;
+  CLOUD.dirty = false;
+  CLOUD.lastSaveOk = false;
+  try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {}
+}
+function acceptSession(r) {
+  CLOUD.token = r.token || CLOUD.token;
+  CLOUD.kingdom = r.kingdom || CLOUD.kingdom;
+  CLOUD.world = r.world || CLOUD.world;
+  CLOUD.offline = false;
+  CLOUD.playingOffline = false;
+  CLOUD.lastError = '';
+  persistSession();
+  if (S && S.mode === 'endless' && CLOUD.kingdom && CLOUD.kingdom.spawn) S.worldSpawn = CLOUD.kingdom.spawn;
+}
+function acctMsg(text, cls) {
+  const el = $('acctMsg');
+  if (!el) return;
+  if (!text) { el.hidden = true; el.textContent = ''; el.className = 'acct-msg'; return; }
+  el.hidden = false;
+  el.textContent = text;
+  el.className = 'acct-msg' + (cls ? ' ' + cls : '');
+}
+function acctBusy(on) {
+  for (const id of ['btnSignIn', 'btnSignUp', 'btnPlayOffline']) {
+    const b = $(id); if (b) b.disabled = !!on;
+  }
+}
+function humanApiError(err) {
+  return ({
+    name_taken: 'That kingdom name is taken.',
+    bad_credentials: 'Wrong name or password.',
+    bad_name: "Use 3–24 letters, numbers, spaces, or hyphens.",
+    bad_password: 'Password must be 6–72 characters.',
+    offline: 'The world is unreachable. You can still play on this phone.',
+    unauthorized: 'Please sign in again.',
+    bad_response: 'The world sent a bad reply.',
+  })[err] || (err ? String(err) : 'Something went wrong.');
+}
+async function api(path, opts) {
+  opts = opts || {};
+  if (CLOUD.forceOffline) {
+    CLOUD.offline = true;
+    CLOUD.lastError = 'offline';
+    return { ok: false, error: 'offline', hint: 'Server unreachable' };
+  }
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (CLOUD.token && !opts.noAuth) headers.Authorization = 'Bearer ' + CLOUD.token;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), opts.timeout || 10000);
+  try {
+    const r = await fetch(apiBase() + path, {
+      method: opts.method || 'GET',
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      signal: ac.signal,
+    });
+    const data = await r.json().catch(() => ({ ok: false, error: 'bad_response' }));
+    clearTimeout(timer);
+    CLOUD.offline = false;
+    if (!data.ok) CLOUD.lastError = data.error || 'error';
+    else CLOUD.lastError = '';
+    return data;
+  } catch (e) {
+    clearTimeout(timer);
+    CLOUD.offline = true;
+    CLOUD.lastError = 'offline';
+    return { ok: false, error: 'offline', hint: 'Server unreachable' };
+  }
+}
+function updateCloudNote() {
+  const el = $('cloudNote');
+  if (!el) return;
+  const chip = $('hKingdom');
+  if (chip) {
+    const on = !!(CLOUD.kingdom && CLOUD.token && S && S.mode === 'endless' && !CLOUD.playingOffline);
+    chip.hidden = !on;
+    if (on) {
+      const v = chip.querySelector('.val');
+      if (v) v.textContent = CLOUD.kingdom.name || '';
+    }
+  }
+  if (CLOUD.playingOffline && S && S.mode === 'endless') {
+    el.hidden = false;
+    el.className = 'warn';
+    el.textContent = 'Playing on this phone only. Progress stays here.';
+    return;
+  }
+  if (CLOUD.token && CLOUD.offline && S && S.mode === 'endless') {
+    el.hidden = false;
+    el.className = 'warn';
+    el.textContent = 'The world is unreachable. Playing offline — changes will not be saved until it is back.';
+    return;
+  }
+  el.hidden = true;
+  el.textContent = '';
+  el.className = '';
+}
+function plainCopy(obj, skip) {
+  const o = {};
+  if (!obj) return o;
+  for (const k of Object.keys(obj)) {
+    if (skip && skip.has(k)) continue;
+    const v = obj[k];
+    if (v == null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') o[k] = v;
+    else if (Array.isArray(v) && v.every(x => x == null || typeof x !== 'object')) o[k] = v.slice();
+  }
+  return o;
+}
+function serializeKingdom() {
+  if (!S || S.mode !== 'endless') return null;
+  const groups = {};
+  function groupId(g) {
+    if (!g) return null;
+    if (!g._sid) g._sid = 'ug' + (Object.keys(groups).length + 1);
+    if (!groups[g._sid]) {
+      groups[g._sid] = {
+        id: g._sid, levelTo: g.levelTo, paid: g.paid, cost: g.cost, prog: g.prog,
+        path: g.path || null, x: g.x, y: g.y, r: g.r, type: 'upgrade',
+        memberIds: (g.members || []).map(m => m && m.id).filter(Boolean),
+      };
+    }
+    return g._sid;
+  }
+  function jobRef(j) {
+    if (!j) return null;
+    if (j.type === 'upgrade' || (j.members && j.cost != null)) return { k: 'upg', id: groupId(j) };
+    if (j.id && (j.type === 'core' || j.type === 'mine' || (S.buildings && S.buildings.includes(j)) || (S.stands && S.stands.includes(j)) || (S.mines && S.mines.includes(j))))
+      return { k: 'id', id: j.id };
+    if (j.kind === 'tree' || (S.trees && S.trees.includes(j))) return { k: 'tree', x: j.x, y: j.y };
+    if (j.kind === 'rock' || (S.rocks && S.rocks.includes(j))) return { k: 'rock', x: j.x, y: j.y };
+    return null;
+  }
+  function snapB(b) {
+    const o = plainCopy(b, new Set(['upgGroup', 'farmer', 'miner', '_pickPath', '_sid', 'members']));
+    if (b.farmer && b.farmer.id) o.farmerId = b.farmer.id;
+    if (b.miner && b.miner.id) o.minerId = b.miner.id;
+    if (b.upgGroup) o.upgG = groupId(b.upgGroup);
+    return o;
+  }
+  const folk = S.folk.map((f, i) => {
+    if (!f.id) f.id = 'f' + (i + 1);
+    const o = plainCopy(f, new Set(['job', 'stand']));
+    o.job = jobRef(f.job);
+    o.stand = f.stand && f.stand.id ? { id: f.stand.id } : null;
+    return o;
+  });
+  const archers = (S.archers || []).map(a => {
+    const o = plainCopy(a, new Set(['post', 'tgt']));
+    if (a.post && a.post.id && (S.buildings.includes(a.post) || S.stands.includes(a.post))) o.post = { k: 'id', id: a.post.id };
+    else if (a.post) o.post = { k: 'pt', x: a.post.x, y: a.post.y, r: a.post.r, sent: a.post.sent };
+    else o.post = null;
+    return o;
+  });
+  const undead = (S.undead || []).map(u => plainCopy(u, new Set(['tgt'])));
+  let leader = null;
+  if (S.leader && S.undead) {
+    const i = S.undead.indexOf(S.leader);
+    if (i >= 0) leader = i;
+  }
+  return {
+    v: 24,
+    seed: S.seed,
+    t: S.t,
+    phase: S.phase,
+    phaseT: S.phaseT,
+    day: S.day,
+    nights: S.nights,
+    nightSpawned: !!S.nightSpawned,
+    coins: S.coins,
+    trickle: S.trickle,
+    rally: !!S.rally,
+    postT: S.postT || 0,
+    over: !!S.over,
+    kills: S.kills || 0,
+    vagrantT: S.vagrantT,
+    spawnT: S.spawnT,
+    spawnGap: S.spawnGap,
+    claimT: S.claimT,
+    claimGap: S.claimGap,
+    chaos: !!S.chaos,
+    bloodMoon: !!S.bloodMoon,
+    nightK: S.nightK || 0,
+    waveSide: S.waveSide || null,
+    waveSrc: S.waveSrc && typeof S.waveSrc === 'object' ? { x: S.waveSrc.x, y: S.waveSrc.y, side: S.waveSrc.side } : (S.waveSrc || null),
+    spawnIndex: S.spawnIndex || 0,
+    nextBid,
+    worldSpawn: S.worldSpawn || (CLOUD.kingdom && CLOUD.kingdom.spawn) || null,
+    stats: S.stats ? { ...S.stats } : {},
+    monarch: plainCopy(S.monarch, new Set(['target'])),
+    regions: (S.regions || []).map(r => {
+      const o = plainCopy(r, new Set(['core']));
+      o.core = r.core ? snapB(r.core) : null;
+      return o;
+    }),
+    buildings: (S.buildings || []).map(snapB),
+    mines: (S.mines || []).map(snapB),
+    camp: S.camp ? { x: S.camp.x, y: S.camp.y, region: S.camp.region } : null,
+    trees: (S.trees || []).map(t => plainCopy(t)),
+    rocks: (S.rocks || []).map(t => plainCopy(t)),
+    ponds: (S.ponds || []).map(t => plainCopy(t)),
+    reeds: (S.reeds || []).map(t => plainCopy(t)),
+    folk, archers, undead,
+    guardians: (S.guardians || []).map(g => plainCopy(g)),
+    drops: (S.drops || []).map(d => plainCopy(d)),
+    rubble: (S.rubble || []).map(d => plainCopy(d)),
+    returnQ: (S.returnQ || []).map(d => (typeof d === 'object' ? plainCopy(d) : d)),
+    spawnQ: (S.spawnQ || []).slice(),
+    claimQ: (S.claimQ || []).map(d => (typeof d === 'object' ? plainCopy(d) : d)),
+    upgGroups: groups,
+    leader,
+  };
+}
+function applyKingdomState(state) {
+  if (!state || typeof state !== 'object') return false;
+  closeInspect();
+  const byId = new Map();
+  function reviveB(raw) {
+    if (!raw) return null;
+    const b = plainCopy(raw, new Set(['upgG', 'farmerId', 'minerId', 'farmer', 'miner', 'upgGroup']));
+    if (raw.id) byId.set(raw.id, b);
+    return b;
+  }
+  const buildings = (state.buildings || []).map(reviveB);
+  const mines = (state.mines || []).map(reviveB);
+  const regions = (state.regions || []).map(r => {
+    const rr = plainCopy(r, new Set(['core']));
+    rr.core = r.core ? reviveB(r.core) : null;
+    return rr;
+  });
+  const trees = (state.trees || []).map(t => plainCopy(t));
+  const rocks = (state.rocks || []).map(t => plainCopy(t));
+  const ponds = (state.ponds || []).map(t => plainCopy(t));
+  const reeds = (state.reeds || []).map(t => plainCopy(t));
+  const folk = (state.folk || []).map(f => {
+    const o = plainCopy(f, new Set(['job', 'stand']));
+    o.job = null;
+    o.stand = null;
+    if (f.id) byId.set(f.id, o);
+    return o;
+  });
+  const emptyStats = { towerShots: 0, paleTowerShots: 0, spawned: 0, captures: 0, losses: 0, retakes: 0,
+    dropped: 0, recruits: 0, tools: 0, roles: 0, built: 0, farmCoins: 0, raised: 0, folkLost: 0, cleared: 0, clearCoins: 0 };
+  S = {
+    seed: state.seed,
+    t: state.t || 0,
+    phase: state.phase || 'day',
+    phaseT: state.phaseT != null ? state.phaseT : DAY,
+    day: state.day || 1,
+    nights: state.nights || 0,
+    nightSpawned: !!state.nightSpawned,
+    coins: state.coins != null ? state.coins : TUNE.startCoins,
+    trickle: state.trickle || 0,
+    regions, buildings,
+    archers: (state.archers || []).map(a => ({ ...plainCopy(a, new Set(['post', 'tgt'])), post: null })),
+    undead: (state.undead || []).map(u => ({ ...plainCopy(u, new Set(['tgt'])), tgt: null })),
+    guardians: (state.guardians || []).map(g => plainCopy(g)),
+    fx: [],
+    folk,
+    drops: (state.drops || []).map(d => plainCopy(d)),
+    stands: [],
+    mines,
+    camp: state.camp ? { ...state.camp } : null,
+    vagrantT: state.vagrantT != null ? state.vagrantT : TUNE.vagrantEvery,
+    rally: !!state.rally,
+    dropHold: false, dropT: 0, postT: state.postT || 0,
+    spawnQ: (state.spawnQ || []).slice(),
+    spawnT: state.spawnT || 0,
+    spawnGap: state.spawnGap || 1,
+    claimQ: (state.claimQ || []).map(x => (x && typeof x === 'object' ? { ...x } : x)),
+    claimT: state.claimT || 0,
+    claimGap: state.claimGap || 1,
+    leader: null,
+    chaos: !!state.chaos,
+    focus: null,
+    waveSrc: state.waveSrc || null,
+    build: null,
+    over: !!state.over,
+    kills: state.kills || 0,
+    mapDirty: true,
+    mode: 'endless',
+    curses: [],
+    blessings: [],
+    choiceLocks: [],
+    rubble: (state.rubble || []).map(x => plainCopy(x)),
+    returnQ: (state.returnQ || []).map(x => (x && typeof x === 'object' ? { ...x } : x)),
+    spawnIndex: state.spawnIndex || 0,
+    score: null,
+    stats: { ...emptyStats, ...(state.stats || {}) },
+    monarch: {
+      x: 0, y: 0, r: 16, hp: 120, max: 120, cd: 0, target: null, speed: 190, vx: 0, vy: 0, face: 0,
+      ...(state.monarch || {}),
+      target: null,
+    },
+    nightK: state.nightK || 0,
+    waveSide: state.waveSide || null,
+    bloodMoon: !!state.bloodMoon,
+    trees, rocks, ponds, reeds,
+    worldSpawn: state.worldSpawn || (CLOUD.kingdom && CLOUD.kingdom.spawn) || null,
+    seeded: true,
+    playRng: mulberry(((state.seed || 0) ^ 0xa5a5a5a5) >>> 0),
+  };
+  S.stands = S.buildings.filter(b => isStandType(b.type) || isStandType(b.tool));
+  (state.folk || []).forEach((raw, i) => {
+    const f = folk[i];
+    if (!f) return;
+    if (raw.stand && raw.stand.id) f.stand = byId.get(raw.stand.id) || null;
+    if (raw.job) {
+      if (raw.job.k === 'id') f.job = byId.get(raw.job.id) || null;
+      else if (raw.job.k === 'tree') f.job = trees.find(t => t.x === raw.job.x && t.y === raw.job.y) || null;
+      else if (raw.job.k === 'rock') f.job = rocks.find(t => t.x === raw.job.x && t.y === raw.job.y) || null;
+    }
+  });
+  (state.buildings || []).forEach((raw, i) => {
+    if (raw.farmerId && buildings[i]) buildings[i].farmer = byId.get(raw.farmerId) || null;
+  });
+  (state.mines || []).forEach((raw, i) => {
+    if (raw.minerId && mines[i]) mines[i].miner = byId.get(raw.minerId) || null;
+  });
+  const groupObjs = {};
+  const gSnap = state.upgGroups || {};
+  for (const gid of Object.keys(gSnap)) {
+    const g = gSnap[gid];
+    const members = (g.memberIds || []).map(id => byId.get(id)).filter(Boolean);
+    const grp = { members, levelTo: g.levelTo, paid: g.paid, cost: g.cost, prog: g.prog, path: g.path, x: g.x, y: g.y, r: g.r, type: 'upgrade', _sid: gid };
+    groupObjs[gid] = grp;
+    for (const m of members) m.upgGroup = grp;
+  }
+  (state.folk || []).forEach((raw, i) => {
+    if (raw.job && raw.job.k === 'upg' && groupObjs[raw.job.id] && folk[i]) folk[i].job = groupObjs[raw.job.id];
+  });
+  (state.archers || []).forEach((raw, i) => {
+    const a = S.archers[i];
+    if (!a) return;
+    if (raw.post && raw.post.k === 'id') a.post = byId.get(raw.post.id) || null;
+    else if (raw.post && raw.post.k === 'pt') a.post = { x: raw.post.x, y: raw.post.y, r: raw.post.r, sent: raw.post.sent };
+    else if (raw.post && typeof raw.post.x === 'number') a.post = { x: raw.post.x, y: raw.post.y, r: raw.post.r, sent: raw.post.sent };
+    else a.post = null;
+  });
+  if (typeof state.leader === 'number' && S.undead[state.leader]) S.leader = S.undead[state.leader];
+  nextBid = Math.max(state.nextBid || 1, 1);
+  for (const id of byId.keys()) {
+    const m = String(id).match(/^b(\d+)$/);
+    if (m) nextBid = Math.max(nextBid, (+m[1]) + 1);
+  }
+  grid = new Uint8Array(GW * GH);
+  for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) grid[gy * GW + gx] = regionIdAt(gx * CELL + CELL / 2, gy * CELL + CELL / 2);
+  markNavDirty();
+  bakeGround();
+  $('title').hidden = true;
+  $('loadout').hidden = true;
+  if ($('account')) $('account').hidden = true;
+  $('over').hidden = !S.over;
+  $('hud').hidden = false;
+  $('bar').hidden = !!S.over;
+  if ($('hScore')) $('hScore').hidden = true;
+  setBuild(null); showMenu(false); clearSel();
+  refreshBuildMenu();
+  $('btnRally').classList.toggle('sel', !!S.rally);
+  zoom = TUNE.zoomStart; applyScale();
+  lookX = S.monarch.x; lookY = S.monarch.y; lookFree = false;
+  pinch = null; wallDrag = null; pts.clear(); ptr = null;
+  clearToasts();
+  const nm = (CLOUD.kingdom && CLOUD.kingdom.name) || 'your kingdom';
+  toast('Welcome back, ' + nm + '.', 'good');
+  updateCloudNote();
+  return true;
+}
+async function openAccount() {
+  showOverlay('account');
+  acctMsg('');
+  acctBusy(false);
+  if (CLOUD.forceOffline) {
+    CLOUD.offline = true;
+    acctMsg(humanApiError('offline'), 'bad');
+    updateCloudNote();
+    return;
+  }
+  const h = await api('/v1/health', { noAuth: true, timeout: 6000 });
+  if (!h.ok) {
+    acctMsg(humanApiError('offline'), 'bad');
+    updateCloudNote();
+  }
+}
+async function requestSignUp(name, password) {
+  CLOUD.playingOffline = false;
+  acctBusy(true);
+  const r = await api('/v1/signup', { method: 'POST', body: { name, password }, noAuth: true });
+  acctBusy(false);
+  if (!r.ok) { acctMsg(humanApiError(r.error), 'bad'); return r; }
+  acceptSession(r);
+  if (r.save && r.save.state) applyKingdomState(r.save.state);
+  else {
+    startEndless();
+    if (CLOUD.kingdom && CLOUD.kingdom.spawn) S.worldSpawn = CLOUD.kingdom.spawn;
+  }
+  acctMsg('');
+  requestSaveKingdom();
+  updateCloudNote();
+  return r;
+}
+async function requestSignIn(name, password) {
+  CLOUD.playingOffline = false;
+  acctBusy(true);
+  const r = await api('/v1/signin', { method: 'POST', body: { name, password }, noAuth: true });
+  acctBusy(false);
+  if (!r.ok) { acctMsg(humanApiError(r.error), 'bad'); return r; }
+  acceptSession(r);
+  if (r.save && r.save.state) applyKingdomState(r.save.state);
+  else {
+    startEndless();
+    if (CLOUD.kingdom && CLOUD.kingdom.spawn) S.worldSpawn = CLOUD.kingdom.spawn;
+    requestSaveKingdom();
+  }
+  acctMsg('');
+  updateCloudNote();
+  return r;
+}
+function requestPlayOffline() {
+  CLOUD.playingOffline = true;
+  // Keep a stored token unused while playing offline from this screen, but do not sign out other devices.
+  startEndless();
+  toast('Playing on this phone only. Progress stays here.', '');
+  updateCloudNote();
+  return true;
+}
+async function requestSignOut() {
+  if (CLOUD.token && !CLOUD.forceOffline) {
+    try { await api('/v1/signout', { method: 'POST' }); } catch (e) {}
+  }
+  clearSession();
+  CLOUD.playingOffline = false;
+  updateCloudNote();
+  showTitle();
+}
+async function requestSaveKingdom() {
+  if (!CLOUD.token || CLOUD.playingOffline || CLOUD.forceOffline) return { ok: false, error: CLOUD.forceOffline ? 'offline' : 'skipped' };
+  if (!S || S.mode !== 'endless') return { ok: false, error: 'no_state' };
+  if (CLOUD.saving) return { ok: false, error: 'busy' };
+  const state = serializeKingdom();
+  if (!state) return { ok: false, error: 'no_state' };
+  CLOUD.saving = true;
+  const r = await api('/v1/kingdom', { method: 'PUT', body: { state } });
+  CLOUD.saving = false;
+  if (r.ok) {
+    CLOUD.dirty = false;
+    CLOUD.lastSaveAt = performance.now();
+    CLOUD.lastSaveOk = true;
+    CLOUD.offline = false;
+  } else {
+    CLOUD.lastSaveOk = false;
+    if (r.error === 'unauthorized') clearSession();
+  }
+  updateCloudNote();
+  return r;
+}
+function maybeAutosave() {
+  if (!isEndlessCloud() || !CLOUD.dirty || CLOUD.saving) return;
+  if (performance.now() - (CLOUD.lastSaveAt || 0) < 15000) return;
+  requestSaveKingdom();
+}
+loadSession();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') requestSaveKingdom();
+});
+window.addEventListener('pagehide', () => { requestSaveKingdom(); });
+
 function showOverlay(id) {
   closeInspect();
-  for (const k of ['title', 'loadout', 'over']) {
+  for (const k of ['title', 'loadout', 'over', 'account']) {
     const el = $(k);
     if (el) el.hidden = k !== id;
   }
-  if (id === 'title' || id === 'loadout') {
+  if (id === 'title' || id === 'loadout' || id === 'account') {
     $('hud').hidden = true;
     $('bar').hidden = true;
     showMenu(false);
@@ -626,6 +1138,7 @@ function newGame(opts) {
   bakeGround();
   $('title').hidden = true;
   $('loadout').hidden = true;
+  if ($('account')) $('account').hidden = true;
   $('over').hidden = true;
   $('hud').hidden = false;
   $('bar').hidden = false;
@@ -638,6 +1151,9 @@ function newGame(opts) {
   pinch = null; wallDrag = null; pts.clear(); ptr = null;
   clearToasts();
   toast('Start with your Builder and House. Order a Hammer stand, then drop coins on vagrants and stands', '');
+  if (CLOUD.kingdom && CLOUD.kingdom.spawn && S.mode === 'endless') S.worldSpawn = CLOUD.kingdom.spawn;
+  if (isEndlessCloud()) { CLOUD.dirty = true; requestSaveKingdom(); }
+  updateCloudNote();
 }
 function mkBld(type, x, y, rid, built) {
   const b = { id: allocBid(), type, x, y, r: 16, hp: 1, max: 1, owner: 'player', region: rid, cd: 0, built: built ? 1 : 0, level: 1, path: null };
@@ -885,8 +1401,13 @@ $('btnSkip').addEventListener('click', () => { if (DEBUG) skipPhase(); });
 $('btnRestart').addEventListener('click', () => newGame({ mode: (S && S.mode) || 'endless' }));
 $('btnRetry').addEventListener('click', () => startChallenge({ curses: lastChallenge.curses, blessings: lastChallenge.blessings, retry: true }));
 $('btnMenu').addEventListener('click', () => showTitle());
-$('btnEndless').addEventListener('click', () => startEndless());
+$('btnEndless').addEventListener('click', () => openAccount());
 $('btnChallenge').addEventListener('click', () => openLoadout());
+$('btnAcctBack').addEventListener('click', () => showTitle());
+$('btnSignIn').addEventListener('click', () => requestSignIn($('acctName').value, $('acctPass').value));
+$('btnSignUp').addEventListener('click', () => requestSignUp($('acctName').value, $('acctPass').value));
+$('btnPlayOffline').addEventListener('click', () => requestPlayOffline());
+$('acctPass').addEventListener('keydown', e => { if (e.key === 'Enter') requestSignIn($('acctName').value, $('acctPass').value); });
 $('btnLoadoutBack').addEventListener('click', () => showTitle());
 $('btnStartChallenge').addEventListener('click', () => startChallenge());
 $('btnInspectClose').addEventListener('click', () => closeInspect());
@@ -2827,6 +3348,7 @@ function startDay() {
     noteUnlock(S.nights);
     if (S.nights >= (TUNE.challengeNights || 20)) { challengeVictory(); return; }
   }
+  if (isEndlessCloud()) { CLOUD.dirty = true; requestSaveKingdom(); }
 }
 function raiseDead(n) {
   const m = enemyMods('skeleton', null);
@@ -3082,6 +3604,7 @@ function gameOver(why) {
   closeInspect();
   $('bar').hidden = true; showMenu(false); if (S) S.dropHold = false;
   $('hint').textContent = '';
+  if (isEndlessCloud()) { CLOUD.dirty = true; requestSaveKingdom(); }
 }
 function challengeVictory() {
   if (!S || S.over) return;
@@ -6912,6 +7435,7 @@ function setVal(id, key, v) {
 }
 function drawHud() {
   if (!S) return;
+  updateCloudNote();
   setVal('hCoins', 'c', String(S.coins));
   if (S.phase === 'day') {
     const t = Math.max(0, Math.ceil(S.phaseT)), mm = (t / 60) | 0, ss = String(t % 60).padStart(2, '0');
@@ -6966,6 +7490,7 @@ function frame(now) {
   for (let i = 0; i < steps && !S.over; i++) update(dt);
   syncInspect();
   render(); drawHud();
+  maybeAutosave();
   requestAnimationFrame(frame);
 }
 
@@ -7027,7 +7552,26 @@ window.__bc = {
   get visibleLabels() { return S && S._visibleLabels; },
   CURSES, BLESSINGS, hasCurse, hasBless, loadoutMultiplier, fmtMult,
   timeBonus, realmBonus, scoreBase, finalScore, enemyMods, buildCost, toolStockCost,
-  showTitle, openLoadout, startEndless, startChallenge,
+  showTitle, openLoadout, startEndless, startChallenge, openAccount,
+  requestSignUp, requestSignIn, requestPlayOffline, requestSaveKingdom, requestSignOut,
+  serializeKingdom, applyKingdomState,
+  get apiBase() { return apiBase(); },
+  set apiBase(v) { window.__bc._apiBase = v; CLOUD.api = v; },
+  forceOffline(v) { CLOUD.forceOffline = !!v; if (v) CLOUD.offline = true; updateCloudNote(); },
+  get cloud() {
+    return {
+      token: !!CLOUD.token,
+      name: CLOUD.kingdom && CLOUD.kingdom.name,
+      id: CLOUD.kingdom && CLOUD.kingdom.id,
+      spawn: CLOUD.kingdom && CLOUD.kingdom.spawn,
+      world: CLOUD.world,
+      offline: !!CLOUD.offline,
+      playingOffline: !!CLOUD.playingOffline,
+      lastError: CLOUD.lastError,
+      lastSaveOk: !!CLOUD.lastSaveOk,
+      saving: !!CLOUD.saving,
+    };
+  },
   unlockAll, resetUnlocks, readUnlocks, writeUnlocks, noteUnlock,
   get lastChallenge() { return lastChallenge; },
   get loadout() { return { curses: [...LO.curses], blessings: [...LO.blessings] }; },

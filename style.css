@@ -168,3 +168,32 @@ canvas{position:fixed;inset:0;display:block;touch-action:none}
 #inspectActions button.ghost{background:#2a2118;border-color:#8c7352;color:#fff6e4}
 #inspectActions button[disabled]{opacity:.55;background:#1c1612;border-color:#5a4a38;color:#c9b488}
 #inspectActions button[disabled] .sub{color:#c9b488}
+
+/* Account screen + cloud note (v24) */
+#account{position:fixed;inset:0;z-index:11;background:rgba(16,12,10,.88);display:flex;align-items:center;justify-content:center;padding:calc(env(safe-area-inset-top) + 12px) 14px calc(env(safe-area-inset-bottom) + 12px);overflow:auto}
+#account[hidden]{display:none}
+.account-card{background:linear-gradient(#3a2c22,#241910);border:3px solid #e6c27a;border-radius:22px;padding:18px 18px 20px;text-align:left;width:min(92vw,400px);
+  box-shadow:0 16px 40px rgba(0,0,0,.45);color:#fff6e4}
+.account-card h1{margin:4px 0 8px;font-size:28px;letter-spacing:.01em;text-align:center}
+.account-card .tag{margin:0 0 16px;font-size:16px;line-height:1.35;color:#f3e6cf;font-weight:700;text-align:center}
+.account-card label{display:block;font-size:16px;font-weight:800;color:#ffe9c4;margin:10px 0 6px}
+.account-card input{display:block;width:100%;box-sizing:border-box;font-family:inherit;font-size:18px;font-weight:700;color:#2a1c10;background:#fff6e4;
+  border:3px solid #2a1c10;border-radius:14px;padding:14px 14px;min-height:54px;-webkit-appearance:none}
+.account-card input:focus{outline:3px solid #f0c14a;outline-offset:1px}
+#btnAcctBack{font-family:inherit;font-size:16px;font-weight:900;padding:12px 14px;border-radius:14px;border:3px solid #2a1c10;
+  background:#f0c14a;color:#2a1c10;width:auto;min-height:52px;min-width:72px}
+#btnSignIn,#btnSignUp,#btnPlayOffline{font-family:inherit;font-size:20px;font-weight:900;padding:14px 18px;border-radius:16px;border:3px solid #2a1c10;
+  background:#f0c14a;color:#2a1c10;width:100%;min-height:56px;margin-top:10px}
+#btnSignUp{background:linear-gradient(#ffe08a,#e2b14a)}
+#btnPlayOffline.ghost,#btnPlayOffline{background:#2a2118;border-color:#8c7352;color:#fff6e4;font-size:18px}
+#btnSignIn:active,#btnSignUp:active,#btnPlayOffline:active,#btnAcctBack:active{transform:scale(.98)}
+#btnSignIn[disabled],#btnSignUp[disabled],#btnPlayOffline[disabled]{opacity:.55}
+.acct-msg{margin:12px 0 4px;font-size:16px;font-weight:800;line-height:1.35;color:#ffe08a;text-align:center}
+.acct-msg.bad{color:#ffb4a8}
+.acct-msg.good{color:#d6ffb0}
+#cloudNote{position:fixed;left:10px;right:10px;top:calc(env(safe-area-inset-top) + 8px);z-index:12;pointer-events:none;
+  text-align:center;font-weight:800;font-size:15px;line-height:1.3;color:#2a1c10;background:#f0c14a;border:3px solid #2a1c10;
+  border-radius:12px;padding:8px 10px;box-shadow:0 6px 16px rgba(0,0,0,.35)}
+#cloudNote[hidden]{display:none}
+#cloudNote.warn{background:#ffe08a}
+#hKingdom .val{max-width:9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
