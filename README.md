@@ -4,6 +4,23 @@ Phone-first, single-page HTML5 canvas prototype (vanilla JS, no build step, no C
 
 **Play:** https://johnsonswork-star.github.io/boundless-crown/  (add `?seed=123` for a repeatable map)
 
+## Modes
+The title screen offers **Endless** and **Challenge**.
+
+- **Endless** is the original game: survive as long as you can. There is no score and no finish line. (This path is kept separate so later multiplayer can hook into it cleanly.)
+- **Challenge** is a scored run. Survive **20 nights** (`TUNE.challengeNights`) to win — Blood Moons on nights 10 and 20 fall inside the run. Before you start, a loadout screen lets you toggle any number of **Curses** (harder, higher score) and **Blessings** (helpful, lower score). The live combined multiplier (the product of every toggle) is shown as you pick. Locked cards stay greyed until you reach nights 5, 10, 15, or 20 in any Challenge run; that progress is saved in `localStorage` under `bc-challenge-unlocks`. `window.__bc.unlockAll()` / `resetUnlocks()` are there for QA.
+
+### Scoring (Challenge only)
+Each survived night adds three parts, same shape as Thronefall:
+
+- **+100** for the night.
+- **Realm Protected** up to **+250** = `250 × (buildings still standing / buildings at nightfall)²`. Each wall segment counts. If you had no buildings, you get the full 250.
+- **Time Bonus** up to **+250** if the wave is cleared within **5 s** of the last spawn. It then falls **linearly** to 0 at **90 s**, and is 0 after that: `250 × (90 − t) / 85`. (Thronefall used a squared falloff; Chris asked for a linear scale-down.)
+
+**Unspent coins × 10**, the curse/blessing multiplier, and a **×1.1** no-restart bonus apply **only on a win**. Defeat still shows those lines, marked as not applied, and the final score is just the base. Retrying the same loadout from the end screen drops the no-restart bonus. A HUD chip shows the running base and the multiplier during the run.
+
+Pacifist Pact: the monarch cannot attack; player buildings, archers, and workers have **2× health and 2× damage** (the current game.wiki description of live Thronefall Pacifist Pact). No Walls is a hard ban on walls and gates. No Towers and No Units make those options very expensive rather than banned.
+
 ## Controls
 - **Drag anywhere** on the map: virtual joystick, the monarch walks that way (WASD/arrows on desktop).
 - **Auto-attack:** the monarch hits the nearest enemy in reach. **Tap an enemy** to focus it.
@@ -60,7 +77,7 @@ The look is original and procedural (baked terrain plus pre-rendered canvas spri
 - Terrain is cached on an offscreen canvas. Sprites, fog, and night lights are pre-rendered so the frame avoids per-entity shadow blurs and gradients. HUD, build-menu, and bottom-bar icons are chunky filled inline SVG (dark rim and a soft highlight), not emoji, so they still show on phones that don't render emoji. Tool-stand badges use the matching bow, hammer, and scythe.
 
 ## Placeholder / stubbed
-- There is no audio and no save.
+- There is no audio. Challenge unlocks are the only save (localStorage).
 - Units: Monarch, Vagrant, Villager, Builder, Farmer, Archer. Scout, Miner, Pikeman and Knight are not in yet. Archers don't hunt animals yet (there are none).
 - Vagrants, villagers, builders, farmers, tool stands, farms, houses, scaffolds, coins and the vagrant camp are procedural sprites in the same warm low-poly style as the rest of the map.
 - No Wood > Stone > Iron tech tiers, and the map has no fog of war or terrain.

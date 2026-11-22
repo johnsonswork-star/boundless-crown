@@ -727,7 +727,7 @@ function pumpToasts() {
   }
 }
 function toast(msg, cls) {
-  (S && (S.toastLog || (S.toastLog = []))).push(msg);
+  if (S) (S.toastLog || (S.toastLog = [])).push(msg);
   toastQ.push({ msg, cls: cls || '' });
   pumpToasts();
 }
