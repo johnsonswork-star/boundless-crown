@@ -862,13 +862,20 @@ async function requestSignOut() {
   updateCloudNote();
   showTitle();
 }
+let saveWaiters = [];
 async function requestSaveKingdom() {
   if (!CLOUD.token || CLOUD.playingOffline || CLOUD.forceOffline) return { ok: false, error: CLOUD.forceOffline ? 'offline' : 'skipped' };
   if (!S || S.mode !== 'endless') return { ok: false, error: 'no_state' };
-  if (CLOUD.saving) return { ok: false, error: 'busy' };
-  const state = serializeKingdom();
-  if (!state) return { ok: false, error: 'no_state' };
+  if (CLOUD.saving) {
+    CLOUD.saveQueued = true;
+    return new Promise(resolve => saveWaiters.push(resolve));
+  }
   CLOUD.saving = true;
+  const state = serializeKingdom();
+  if (!state) {
+    CLOUD.saving = false;
+    return { ok: false, error: 'no_state' };
+  }
   const r = await api('/v1/kingdom', { method: 'PUT', body: { state } });
   CLOUD.saving = false;
   if (r.ok) {
@@ -881,6 +888,15 @@ async function requestSaveKingdom() {
     if (r.error === 'unauthorized') clearSession();
   }
   updateCloudNote();
+  if (CLOUD.saveQueued) {
+    CLOUD.saveQueued = false;
+    const r2 = await requestSaveKingdom();
+    const waiters = saveWaiters.splice(0);
+    for (const fn of waiters) fn(r2);
+    return r2;
+  }
+  const waiters = saveWaiters.splice(0);
+  for (const fn of waiters) fn(r);
   return r;
 }
 function maybeAutosave() {
