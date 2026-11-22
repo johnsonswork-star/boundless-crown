@@ -8,7 +8,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>Boundless Crown — prototype</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23241910'/%3E%3Cpath fill='%23f0c14a' d='M3 12.2 4.2 6.2 8 9.1 11.8 6.2 13 12.2z'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=20">
+<link rel="stylesheet" href="style.css?v=21">
 </head>
 <body>
 <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
@@ -174,12 +174,13 @@
   </symbol>
 </svg>
 <canvas id="c"></canvas>
-<div id="hud">
+<div id="hud" hidden>
   <div class="row">
     <span id="hCoins" class="pill"><svg class="ico gold" viewBox="0 0 24 24"><use href="#i-coin"/></svg><span class="val">0</span></span>
     <span id="hPhase" class="pill"><svg class="ico sun gold" viewBox="0 0 24 24"><use href="#i-sun"/></svg><svg class="ico moon gold" viewBox="0 0 24 24"><use href="#i-moon"/></svg><span class="val">Day 1:00</span></span>
     <span id="hNights" class="pill"><svg class="ico gold" viewBox="0 0 24 24"><use href="#i-moon"/></svg><span class="val">0</span></span>
     <span id="hRegions" class="pill"><svg class="ico gold" viewBox="0 0 24 24"><use href="#i-castle"/></svg><span class="val">1/7</span></span>
+    <span id="hScore" class="pill score-chip" hidden><svg class="ico gold" viewBox="0 0 24 24"><use href="#i-crown"/></svg><span class="val">0 · ×1.00</span></span>
   </div>
   <div class="row">
     <div id="hpWrap"><div id="hpBar"></div><span id="hpText"><svg class="ico gold" viewBox="0 0 24 24"><use href="#i-crown"/></svg><span class="val">120 / 120</span></span></div>
@@ -203,18 +204,60 @@
   <button data-act="demolish" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-demo"/></svg><b>Demolish</b><i>Free</i></button>
   <button data-act="close" type="button" class="close" aria-label="Close"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
 </div>
-<div id="bar">
+<div id="bar" hidden>
   <button id="btnBuild" data-act="build" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-hammer"/></svg><b>Build</b><i>menu</i></button>
   <button id="btnDrop" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-drop"/></svg><b>Drop coin</b><i>hold = more</i></button>
   <button id="btnRally" data-act="rally" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-flag"/></svg><b>Rally</b><i>off</i></button>
 </div>
-<div id="over" hidden>
-  <div class="card">
-    <h1 id="overTitle">The Crown has fallen</h1>
-    <p id="overStats"></p>
-    <button id="btnRestart" type="button">Restart</button>
+<div id="title">
+  <div class="card title-card">
+    <h1>Boundless Crown</h1>
+    <p class="tag">A throne in a wild land. Choose how you will rule.</p>
+    <button id="btnEndless" type="button">Endless</button>
+    <p class="mode-desc">Survive as long as you can. No score, no finish line.</p>
+    <button id="btnChallenge" type="button">Challenge</button>
+    <p class="mode-desc">Survive 20 nights. Pick curses and blessings, then chase a high score.</p>
   </div>
 </div>
-<script src="game.js?v=20"></script>
+<div id="loadout" hidden>
+  <div class="loadout-sheet">
+    <header class="loadout-head">
+      <button id="btnLoadoutBack" type="button">Back</button>
+      <div class="loadout-title">
+        <h1>Challenge</h1>
+        <p id="loadoutGoal">Survive 20 nights</p>
+      </div>
+      <div id="loadoutMult" class="loadout-mult">×1.00</div>
+    </header>
+    <div class="loadout-body">
+      <section class="loadout-sec">
+        <h2>Curses</h2>
+        <p class="sec-note">Harder nights, a higher score if you win.</p>
+        <div id="curseList" class="loadout-grid"></div>
+      </section>
+      <section class="loadout-sec">
+        <h2>Blessings</h2>
+        <p class="sec-note">Helpful boons that lower the score multiplier.</p>
+        <div id="blessList" class="loadout-grid"></div>
+      </section>
+    </div>
+    <div class="loadout-foot">
+      <button id="btnStartChallenge" type="button">Begin Challenge</button>
+    </div>
+  </div>
+</div>
+<div id="over" hidden>
+  <div class="card over-card">
+    <h1 id="overTitle">The Crown has fallen</h1>
+    <p id="overStats"></p>
+    <div id="overScore" hidden></div>
+    <div id="overBtns">
+      <button id="btnRestart" type="button">Restart</button>
+      <button id="btnRetry" type="button" hidden>Retry</button>
+      <button id="btnMenu" type="button" hidden>Menu</button>
+    </div>
+  </div>
+</div>
+<script src="game.js?v=21"></script>
 </body>
 </html>

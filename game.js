@@ -73,6 +73,55 @@ const TUNE = {
   towerCd: { 1: 0.8, cannon: [2.4, 2.2], ballista: [1.6, 1.4] },
   towerAoe: { cannon: [56, 80], ballista: [0, 0] },
   towerPierce: { cannon: [0, 0], ballista: [3, 5] },
+  challengeNights: 20,
+  scoreNight: 100,
+  scoreProtect: 250,
+  scoreTime: 250,
+  scoreTimeFull: 5,
+  scoreTimeZero: 90,
+  scoreCoin: 10,
+  noRestartBonus: 1.1,
+  blessPurseCoins: 6,
+  blessHideHp: 40,
+  blessSwift: 0.7,
+  blessArrowRange: 1.4,
+  blessHouseCost: 3,
+  blessMending: 2,
+  blessDawnHeal: 80,
+  blessFieldCoins: 1,
+  blessRoadEvery: 0.5,
+  blessRoadMax: 2,
+  blessSharpDmg: 8,
+  blessStoneHp: 1.4,
+  curseTurtleHp: 1.6,
+  curseTigerDmg: 1.75,
+  curseFalconSpeed: 1.75,
+  curseSnakeCoin: 0.5,
+  curseWaspNights: 3,
+  curseWaspCount: 2,
+  curseWaspSpawn: 1.25,
+  cursePhoenixRate: 0.04,
+  cursePhoenixCap: 15,
+  curseEliteEvery: 4,
+  curseEliteHp: 4,
+  curseEliteDmg: 3,
+  curseGrowthMax: 0.75,
+  curseAfterlifeDelay: 4,
+  curseChaosDelay: 3,
+  curseDestroyRepair: 0.33,
+  curseDestroyWait: 2,
+  curseNoTowerMul: 3,
+  curseNoUnitAdd: 10,
+  curseRangeHp: 2,
+  curseRangeDmg: 1.4,
+  curseRangeSpd: 1.5,
+  curseRangeRng: 1.7,
+  curseRangeCd: 0.7,
+  pacifistHp: 2,
+  pacifistDmg: 2,
+  monarchDmg: 22,
+  archerDmg: 9,
+  archerRange: 210,
   mineR: 22,
 };
 
@@ -97,6 +146,370 @@ const BLD = {
 };
 Object.assign(COST, TUNE.standCost);
 COST.gate = TUNE.gateCost;
+
+// ---------- Challenge: curses, blessings, score, unlocks ----------
+// Pacifist: monarch cannot attack; player buildings, archers, and workers
+// have 2× health and 2× damage (game.wiki description of live Thronefall Pacifist Pact).
+const CURSES = [
+  { id: 'turtle', name: 'Turtle God', effect: 'Enemies have +60% health', mult: 1.4, unlock: 0 },
+  { id: 'tiger', name: 'Tiger God', effect: 'Enemies deal +75% damage', mult: 1.2, unlock: 0 },
+  { id: 'snake', name: 'Snake God', effect: 'Enemies drop half as many coins', mult: 1.3, unlock: 0 },
+  { id: 'wasp', name: 'Wasp God', effect: 'First 3 nights: twice as many enemies, 25% faster spawns', mult: 1.2, unlock: 0 },
+  { id: 'nowalls', name: 'No Walls Pact', effect: 'You cannot build walls or gates', mult: 1.1, unlock: 0 },
+  { id: 'falcon', name: 'Falcon God', effect: 'Enemies move 75% faster', mult: 1.2, unlock: 5 },
+  { id: 'phoenix', name: 'Phoenix God', effect: 'Enemies regenerate 4% health per second (max 15, not Necromancers)', mult: 1.3, unlock: 5 },
+  { id: 'notowers', name: 'No Towers Pact', effect: 'Towers cost three times as much to build and upgrade', mult: 1.2, unlock: 5 },
+  { id: 'death', name: 'God of Death', effect: 'Workers and archers take no action at night', mult: 1.2, unlock: 5 },
+  { id: 'elite', name: 'Elite God', effect: 'Every 4th enemy is an elite with 4× health and 3× damage', mult: 1.75, unlock: 10 },
+  { id: 'growth', name: 'Growth God', effect: 'Enemies grow stronger each night, up to +75% health and damage', mult: 1.5, unlock: 10 },
+  { id: 'nounits', name: 'No Units Pact', effect: 'Bow stands and bows cost 10 more coins', mult: 1.4, unlock: 10 },
+  { id: 'destruction', name: 'God of Destruction', effect: 'Builders repair at one-third speed; wrecked buildings leave rubble for an extra day', mult: 1.2, unlock: 10 },
+  { id: 'afterlife', name: 'God of Afterlife', effect: 'Slain shamblers and skeletons return once after a short delay', mult: 1.5, unlock: 15 },
+  { id: 'chaos', name: 'God of Chaos', effect: 'Enemies appear on your land and cannot attack for 3 seconds', mult: 1.45, unlock: 15 },
+  { id: 'range', name: 'Range God', effect: 'Necromancers and Pale towers have much more range, health, and damage', mult: 1.2, unlock: 15 },
+  { id: 'pacifist', name: 'Pacifist Pact', effect: 'The monarch cannot attack; your buildings and people have 2× health and damage', mult: 1.4, unlock: 15 },
+  { id: 'choice', name: 'God of Choice', effect: 'Half of your build and upgrade options are locked for this run', mult: 1.1, unlock: 20 },
+];
+const BLESSINGS = [
+  { id: 'dawn', name: 'Blessing of the Dawn', effect: 'Enemies have 20% less health and deal 20% less damage', mult: 0.6, unlock: 0 },
+  { id: 'purse', name: 'Royal Purse', effect: 'Start the run with 6 extra coins', mult: 0.90, unlock: 0 },
+  { id: 'hide', name: 'Iron Hide', effect: 'The monarch has 40 more health', mult: 0.90, unlock: 0 },
+  { id: 'swift', name: 'Swift Builders', effect: 'Builders work 30% faster', mult: 0.88, unlock: 0 },
+  { id: 'arrows', name: 'Keen Arrows', effect: 'Archers shoot 40% farther', mult: 0.90, unlock: 5 },
+  { id: 'hearths', name: 'Cheap Hearths', effect: 'Houses cost 3 coins instead of 6', mult: 0.92, unlock: 5 },
+  { id: 'mending', name: 'Mending Hands', effect: 'Builders repair twice as fast', mult: 0.92, unlock: 5 },
+  { id: 'rest', name: 'Dawn Rest', effect: 'Dawn restores 80 more health to the monarch', mult: 0.92, unlock: 10 },
+  { id: 'fields', name: 'Bountiful Fields', effect: 'Worked farms pay 1 extra coin', mult: 0.90, unlock: 10 },
+  { id: 'road', name: 'Open Road', effect: 'Vagrants arrive twice as often, and two more can wait at camp', mult: 0.92, unlock: 10 },
+  { id: 'sharp', name: 'Sharp Crown', effect: 'The monarch deals 8 more damage', mult: 0.90, unlock: 15 },
+  { id: 'stone', name: 'Stone Walls', effect: 'Walls and gates have 40% more health', mult: 0.90, unlock: 15 },
+];
+const CHOICE_OPTS = ['wall', 'gate', 'tower', 'farm', 'house', 'hammer', 'bow', 'scythe', 'pick',
+  'upgrade-keep', 'upgrade-house', 'upgrade-wall', 'upgrade-tower-cannon', 'upgrade-tower-ballista', 'upgrade-farm'];
+const UNLOCK_KEY = 'bc-challenge-unlocks';
+let LO = { curses: new Set(), blessings: new Set() };
+let lastChallenge = { curses: [], blessings: [] };
+let unlockOverride = null;
+
+function isChallenge() { return !!(S && S.mode === 'challenge'); }
+function hasCurse(id) { return !!(S && S.curses && S.curses.indexOf(id) >= 0); }
+function hasBless(id) { return !!(S && S.blessings && S.blessings.indexOf(id) >= 0); }
+function catalogById(id) {
+  return CURSES.find(c => c.id === id) || BLESSINGS.find(b => b.id === id) || null;
+}
+function loadoutMultiplier(curses, blessings) {
+  let m = 1;
+  for (const id of curses || []) { const c = CURSES.find(x => x.id === id); if (c) m *= c.mult; }
+  for (const id of blessings || []) { const b = BLESSINGS.find(x => x.id === id); if (b) m *= b.mult; }
+  return m;
+}
+function fmtMult(m) {
+  const r = Math.round(m * 100) / 100;
+  return '×' + r.toFixed(r >= 10 || Number.isInteger(r * 10) && Math.abs(r * 10 - Math.round(r * 10)) < 1e-6 ? 2 : 2);
+}
+function readUnlocks() {
+  if (unlockOverride != null) return { bestNight: unlockOverride, debug: true };
+  try {
+    const raw = localStorage.getItem(UNLOCK_KEY);
+    if (!raw) return { bestNight: 0 };
+    const o = JSON.parse(raw);
+    return { bestNight: Math.max(0, +o.bestNight || 0) };
+  } catch (e) { return { bestNight: 0 }; }
+}
+function writeUnlocks(bestNight) {
+  const cur = readUnlocks();
+  const n = Math.max(cur.bestNight || 0, bestNight | 0);
+  if (unlockOverride != null && unlockOverride >= n) return n;
+  try { localStorage.setItem(UNLOCK_KEY, JSON.stringify({ bestNight: n })); } catch (e) {}
+  return n;
+}
+function noteUnlock(nights) {
+  if (!isChallenge()) return;
+  const prev = readUnlocks().bestNight || 0;
+  const n = writeUnlocks(nights);
+  if (n > prev) {
+    const freshly = [].concat(CURSES, BLESSINGS).filter(x => x.unlock > prev && x.unlock <= n);
+    if (freshly.length) toast('Unlocked: ' + freshly.map(x => x.name).join(', '), 'good');
+  }
+}
+function isUnlocked(entry) {
+  if (!entry.unlock) return true;
+  return (readUnlocks().bestNight || 0) >= entry.unlock;
+}
+function unlockAll() { unlockOverride = 99; }
+function resetUnlocks() {
+  unlockOverride = null;
+  try { localStorage.removeItem(UNLOCK_KEY); } catch (e) {}
+}
+
+function buildCost(type) {
+  let c = COST[type];
+  if (c == null) return 0;
+  if (type === 'house' && hasBless('hearths')) c = TUNE.blessHouseCost;
+  if (type === 'tower' && hasCurse('notowers')) c = Math.round(c * (TUNE.curseNoTowerMul || 3));
+  if (type === 'bow' && hasCurse('nounits')) c = c + (TUNE.curseNoUnitAdd || 10);
+  return c;
+}
+function toolStockCost(kind) {
+  let c = TOOL[kind] ? TOOL[kind].cost : 0;
+  if (kind === 'bow' && hasCurse('nounits')) c += (TUNE.curseNoUnitAdd || 10);
+  return c;
+}
+function workSpeed() { return hasBless('swift') ? (TUNE.blessSwift || 0.7) : 1; }
+function repairSpeed() {
+  let r = TUNE.repairRate;
+  if (hasCurse('destruction')) r *= (TUNE.curseDestroyRepair || 0.33);
+  if (hasBless('mending')) r *= (TUNE.blessMending || 2);
+  return r;
+}
+function vagrantEvery() { return TUNE.vagrantEvery * (hasBless('road') ? (TUNE.blessRoadEvery || 0.5) : 1); }
+function vagrantMax() { return TUNE.vagrantMax + (hasBless('road') ? (TUNE.blessRoadMax || 2) : 0); }
+function monarchDamage() {
+  if (hasCurse('pacifist')) return 0;
+  return (TUNE.monarchDmg || 22) + (hasBless('sharp') ? (TUNE.blessSharpDmg || 8) : 0);
+}
+function archerDamage() {
+  let d = TUNE.archerDmg || 9;
+  if (hasCurse('pacifist')) d *= (TUNE.pacifistDmg || 2);
+  return d;
+}
+function archerRangeOf() {
+  return (TUNE.archerRange || 210) * (hasBless('arrows') ? (TUNE.blessArrowRange || 1.4) : 1);
+}
+function allyHpMul() { return hasCurse('pacifist') ? (TUNE.pacifistHp || 2) : 1; }
+function allyDmgMul() { return hasCurse('pacifist') ? (TUNE.pacifistDmg || 2) : 1; }
+function optionLocked(key) {
+  return !!(S && S.choiceLocks && S.choiceLocks.indexOf(key) >= 0);
+}
+function pickChoiceLocks(rnd) {
+  const roll = rnd || rand;
+  const pool = CHOICE_OPTS.slice();
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = (roll() * (i + 1)) | 0;
+    const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+  }
+  const n = Math.ceil(pool.length / 2);
+  return pool.slice(0, n);
+}
+
+function timeBonus(dtSinceLastSpawn) {
+  const fullAt = TUNE.scoreTimeFull || 5, zeroAt = TUNE.scoreTimeZero || 90, max = TUNE.scoreTime || 250;
+  if (dtSinceLastSpawn <= fullAt) return max;
+  if (dtSinceLastSpawn >= zeroAt) return 0;
+  return Math.round(max * (zeroAt - dtSinceLastSpawn) / (zeroAt - fullAt));
+}
+function realmBonus(standing, total) {
+  const max = TUNE.scoreProtect || 250;
+  if (!total) return max;
+  const r = standing / total;
+  return Math.round(max * r * r);
+}
+function scoreBase(sc) { return (sc.nights || 0) + (sc.protected || 0) + (sc.time || 0); }
+function finalScore(sc, applied) {
+  const base = scoreBase(sc);
+  if (!applied) return base;
+  const coins = (sc.coinScore || 0);
+  const m = sc.multiplier || 1;
+  const nr = sc.noRestart ? (TUNE.noRestartBonus || 1.1) : 1;
+  return Math.round((base + coins) * m * nr);
+}
+
+function refreshBuildMenu() {
+  const menu = $('buildMenu');
+  if (!menu) return;
+  for (const btn of menu.querySelectorAll('button[data-act]')) {
+    const act = btn.dataset.act;
+    if (act === 'close' || act === 'clear' || act === 'demolish' || act === 'build') continue;
+    const banned = (act === 'wall' || act === 'gate') && hasCurse('nowalls');
+    const locked = optionLocked(act);
+    btn.classList.toggle('locked-opt', !!(banned || locked));
+    btn.disabled = !!(banned || locked);
+    const i = btn.querySelector('i');
+    if (!i || act === 'demolish') continue;
+    if (act === 'clear') continue;
+    if (COST[act] != null) {
+      const c = buildCost(act);
+      i.innerHTML = '<svg class="ico" viewBox="0 0 24 24"><use href="#i-coin"/></svg>' + c;
+    }
+  }
+}
+
+function renderLoadout() {
+  const fill = (el, list, kind) => {
+    if (!el) return;
+    el.innerHTML = '';
+    const picked = kind === 'curse' ? LO.curses : LO.blessings;
+    for (const item of list) {
+      const open = isUnlocked(item);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'loadout-card' + (open && picked.has(item.id) ? ' on' : '') + (open ? '' : ' locked');
+      btn.dataset.id = item.id;
+      btn.dataset.kind = kind;
+      const copy = document.createElement('span');
+      copy.className = 'copy';
+      copy.innerHTML = '<span class="name"></span><span class="effect"></span>';
+      copy.querySelector('.name').textContent = item.name;
+      copy.querySelector('.effect').textContent = open ? item.effect : ('Reach night ' + item.unlock);
+      btn.appendChild(copy);
+      if (open) {
+        const m = document.createElement('span');
+        m.className = 'mult';
+        m.textContent = fmtMult(item.mult);
+        btn.appendChild(m);
+      } else {
+        const lock = document.createElement('span');
+        lock.className = 'lock';
+        lock.textContent = 'Reach night ' + item.unlock;
+        btn.appendChild(lock);
+      }
+      btn.addEventListener('click', () => {
+        if (!isUnlocked(item)) { toast('Reach night ' + item.unlock + ' in a Challenge run to unlock', 'bad'); return; }
+        if (picked.has(item.id)) picked.delete(item.id); else picked.add(item.id);
+        renderLoadout();
+      });
+      el.appendChild(btn);
+    }
+  };
+  fill($('curseList'), CURSES, 'curse');
+  fill($('blessList'), BLESSINGS, 'bless');
+  const m = loadoutMultiplier([...LO.curses], [...LO.blessings]);
+  $('loadoutMult').textContent = fmtMult(m);
+  const n = TUNE.challengeNights || 20;
+  $('loadoutGoal').textContent = 'Survive ' + n + ' nights';
+}
+
+function showOverlay(id) {
+  for (const k of ['title', 'loadout', 'over']) {
+    const el = $(k);
+    if (el) el.hidden = k !== id;
+  }
+  if (id === 'title' || id === 'loadout') {
+    $('hud').hidden = true;
+    $('bar').hidden = true;
+    showMenu(false);
+    if (S) S.dropHold = false;
+  }
+}
+function showTitle() {
+  S = null;
+  showOverlay('title');
+  $('hint').textContent = '';
+  clearToasts();
+}
+function openLoadout() {
+  showOverlay('loadout');
+  renderLoadout();
+}
+function startEndless() {
+  newGame({ mode: 'endless' });
+}
+function startChallenge(opts) {
+  opts = opts || {};
+  const curses = opts.curses || [...LO.curses];
+  const blessings = opts.blessings || [...LO.blessings];
+  lastChallenge = { curses: curses.slice(), blessings: blessings.slice() };
+  newGame({ mode: 'challenge', curses, blessings, retry: !!opts.retry });
+}
+
+function paintScoreBreakdown(sc, applied, into) {
+  const el = into || $('overScore');
+  if (!el) return;
+  el.hidden = false;
+  const rows = [];
+  const add = (label, val, mute) => {
+    rows.push('<div class="row' + (mute ? ' mute' : '') + '"><span>' + label + '</span><span>' + val + '</span></div>');
+  };
+  add('Nights survived', String(sc.nightsCount || 0) + '  →  ' + (sc.nights || 0));
+  add('Realm protected', '+' + (sc.protected || 0));
+  add('Time bonus', '+' + (sc.time || 0));
+  add('Base score', String(scoreBase(sc)));
+  add('Unspent coins × 10', '+' + (sc.coinScore || 0), !applied);
+  add('Curse / blessing multiplier', fmtMult(sc.multiplier || 1), !applied);
+  add('No-restart bonus', sc.noRestart ? '×1.1' : '×1.0', !applied);
+  if (!applied) add('Bonuses applied', 'Not applied — win to score them', true);
+  rows.push('<div class="row total"><span>Final score</span><span>' + finalScore(sc, applied) + '</span></div>');
+  el.innerHTML = rows.join('');
+}
+
+function snapshotNightBuildings() {
+  if (!isChallenge()) return;
+  S.nightBlds = S.buildings.filter(b => b.owner === 'player' && b.built >= 1 && b.type !== 'core').slice();
+  S.lastSpawnAt = S.t;
+}
+function recordNightScore() {
+  if (!isChallenge() || !S.score) return;
+  const total = (S.nightBlds && S.nightBlds.length) || 0;
+  let standing = 0;
+  if (total) {
+    for (const b of S.nightBlds) {
+      if (S.buildings.includes(b) && b.owner === 'player' && b.hp > 0) standing++;
+    }
+  }
+  const prot = realmBonus(standing, total);
+  const tbonus = timeBonus(Math.max(0, S.t - (S.lastSpawnAt || S.t)));
+  S.score.nightsCount = (S.score.nightsCount || 0) + 1;
+  S.score.nights += (TUNE.scoreNight || 100);
+  S.score.protected += prot;
+  S.score.time += tbonus;
+  S.score.log.push({ night: S.score.nightsCount, standing, total, prot, time: tbonus });
+}
+function syncChallengeScore() {
+  if (!isChallenge() || !S.score) return;
+  S.score.coinScore = (S.coins | 0) * (TUNE.scoreCoin || 10);
+  S.score.multiplier = loadoutMultiplier(S.curses, S.blessings);
+  S.score.base = scoreBase(S.score);
+  S.score.final = finalScore(S.score, true);
+}
+
+function growthFactor() {
+  if (!hasCurse('growth') || !isChallenge()) return 1;
+  const cap = TUNE.challengeNights || 20;
+  const night = Math.min(cap, (S.nights || 0) + 1);
+  return 1 + (TUNE.curseGrowthMax || 0.75) * (night / cap);
+}
+function enemyMods(kind, spawnIndex, opts) {
+  const s = UNDEAD[kind] || UNDEAD.shambler;
+  let hp = s.hp, speed = s.speed, dmg = s.dmg, r = s.r, coin = s.coin;
+  const eliteEvery = TUNE.curseEliteEvery || 4;
+  let elite = false;
+  if (hasBless('dawn')) { hp *= 0.8; dmg *= 0.8; }
+  if (hasCurse('turtle')) hp *= (TUNE.curseTurtleHp || 1.6);
+  if (hasCurse('tiger')) dmg *= (TUNE.curseTigerDmg || 1.75);
+  if (hasCurse('falcon')) speed *= (TUNE.curseFalconSpeed || 1.75);
+  const g = growthFactor();
+  if (g !== 1) { hp *= g; dmg *= g; }
+  if (hasCurse('snake')) coin = Math.max(1, Math.round(coin * (TUNE.curseSnakeCoin || 0.5)));
+  if (hasCurse('elite') && spawnIndex != null && eliteEvery > 0 && (spawnIndex % eliteEvery === eliteEvery - 1)) {
+    hp *= (TUNE.curseEliteHp || 4);
+    dmg *= (TUNE.curseEliteDmg || 3);
+    r *= 1.15;
+    elite = true;
+  }
+  if (hasCurse('range') && kind === 'necro') {
+    hp *= (TUNE.curseRangeHp || 2);
+    dmg *= (TUNE.curseRangeDmg || 1.4);
+    speed *= (TUNE.curseRangeSpd || 1.5);
+  }
+  return {
+    hp: Math.max(1, Math.round(hp)),
+    speed,
+    dmg,
+    r,
+    coin,
+    elite,
+    rangeMul: (hasCurse('range') && kind === 'necro') ? (TUNE.curseRangeRng || 1.7) : 1,
+    cdMul: (hasCurse('range') && kind === 'necro') ? (TUNE.curseRangeCd || 0.7) : 1,
+  };
+}
+function chaosSpawnPoint() {
+  const home = S.regions[0] || { x: CX, y: CY };
+  const ownedR = owned();
+  const base = ownedR.length ? ownedR[(rand() * ownedR.length) | 0] : home;
+  const ang = rand() * Math.PI * 2, rad = 40 + rand() * 160;
+  return { x: clamp(base.x + Math.cos(ang) * rad, 20, W - 20), y: clamp(base.y + Math.sin(ang) * rad, 20, H - 20) };
+}
+
 
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const $ = id => document.getElementById(id);
@@ -134,18 +547,29 @@ function regionIdAt(x, y) {
   return best;
 }
 
-function newGame() {
+function newGame(opts) {
+  opts = opts || {};
+  const mode = opts.mode || 'endless';
   const q = new URLSearchParams(location.search);
   const seedQ = q.get('seed');
   const seeded = seedQ != null && seedQ !== '';
   const seed = seeded ? ((+seedQ) || 0) : ((Math.random() * 1e9) | 0);
   const rnd = mulberry(seed);
+  const curses = mode === 'challenge' ? (opts.curses || []).slice() : [];
+  const blessings = mode === 'challenge' ? (opts.blessings || []).slice() : [];
   S = {
     seed, t: 0, phase: 'day', phaseT: DAY, day: 1, nights: 0, nightSpawned: false, coins: TUNE.startCoins, trickle: 0,
     regions: [], buildings: [], archers: [], undead: [], guardians: [], fx: [],
     folk: [], drops: [], stands: [], mines: [], camp: null, vagrantT: TUNE.vagrantEvery, rally: false, dropHold: false, dropT: 0, postT: 0,
     spawnQ: [], spawnT: 0, spawnGap: 1, leader: null, chaos: false, focus: null, waveSrc: null,
-    build: null, over: false, kills: 0, mapDirty: true,
+    build: null, over: false, kills: 0, mapDirty: true, mode, curses, blessings,
+    choiceLocks: (mode === 'challenge' && curses.indexOf('choice') >= 0) ? pickChoiceLocks(rnd) : [],
+    rubble: [], returnQ: [], spawnIndex: 0,
+    score: mode === 'challenge' ? {
+      nights: 0, protected: 0, time: 0, nightsCount: 0, coinScore: 0,
+      multiplier: loadoutMultiplier(curses, blessings), noRestart: !opts.retry,
+      log: [], base: 0, final: 0
+    } : null,
     stats: { towerShots: 0, paleTowerShots: 0, spawned: 0, captures: 0, losses: 0, retakes: 0,
       dropped: 0, recruits: 0, tools: 0, roles: 0, built: 0, farmCoins: 0, raised: 0, folkLost: 0, cleared: 0, clearCoins: 0 },
     monarch: { x: 0, y: 0, r: 16, hp: 120, max: 120, cd: 0, target: null, speed: 190, vx: 0, vy: 0, face: 0 },
@@ -176,6 +600,9 @@ function newGame() {
       hp: Math.round(140 + d * 0.08), max: Math.round(140 + d * 0.08), dmg: 9, cd: 0, region: r.id });
   }
   S.monarch.x = home.x; S.monarch.y = home.y + 40;
+  if (hasBless('purse')) S.coins += (TUNE.blessPurseCoins || 6);
+  if (hasBless('hide')) { S.monarch.max += (TUNE.blessHideHp || 40); S.monarch.hp = S.monarch.max; }
+  S.vagrantT = vagrantEvery();
   S.focus = null;
   S.mines = [];
   setupHome();
@@ -183,9 +610,14 @@ function newGame() {
   markNavDirty();
   buildDecor();
   bakeGround();
+  $('title').hidden = true;
+  $('loadout').hidden = true;
   $('over').hidden = true;
+  $('hud').hidden = false;
   $('bar').hidden = false;
+  $('hScore').hidden = mode !== 'challenge';
   setBuild(null); showMenu(false); clearSel();
+  refreshBuildMenu();
   $('btnRally').classList.remove('sel');
   zoom = TUNE.zoomStart; applyScale();
   lookX = S.monarch.x; lookY = S.monarch.y; lookFree = false;
@@ -200,7 +632,8 @@ function mkBld(type, x, y, rid, built) {
   return b;
 }
 function mkFolk(role, x, y) {
-  return { type: 'folk', role, x, y, r: 9, hp: 24, max: 24, tx: null, ty: null, wt: 0, ph: Math.random() * 6.28, job: null, stand: null, state: 'idle' };
+  const hp = Math.round(24 * allyHpMul());
+  return { type: 'folk', role, x, y, r: 9, hp, max: hp, tx: null, ty: null, wt: 0, ph: Math.random() * 6.28, job: null, stand: null, state: 'idle' };
 }
 function setupHome() {
   const h = S.regions[0];
@@ -395,6 +828,12 @@ $('bar').addEventListener('click', e => {
 });
 $('buildMenu').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || !S || S.over) return;
+  if (b.disabled || b.classList.contains('locked-opt')) {
+    const act = b.dataset.act;
+    if ((act === 'wall' || act === 'gate') && hasCurse('nowalls')) toast('No Walls Pact forbids walls and gates', 'bad');
+    else toast('God of Choice locked this option', 'bad');
+    return;
+  }
   showMenu(false);
   if (b.dataset.act !== 'close') setBuild(b.dataset.act); // stays selected for repeat placement
 });
@@ -410,10 +849,18 @@ const dropEnd = () => { if (S) S.dropHold = false; dropBtn.classList.remove('hel
 for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) dropBtn.addEventListener(t, dropEnd);
 $('btnSkip').hidden = !DEBUG;
 $('btnSkip').addEventListener('click', () => { if (DEBUG) skipPhase(); });
-$('btnRestart').addEventListener('click', () => newGame());
+$('btnRestart').addEventListener('click', () => newGame({ mode: (S && S.mode) || 'endless' }));
+$('btnRetry').addEventListener('click', () => startChallenge({ curses: lastChallenge.curses, blessings: lastChallenge.blessings, retry: true }));
+$('btnMenu').addEventListener('click', () => showTitle());
+$('btnEndless').addEventListener('click', () => startEndless());
+$('btnChallenge').addEventListener('click', () => openLoadout());
+$('btnLoadoutBack').addEventListener('click', () => showTitle());
+$('btnStartChallenge').addEventListener('click', () => startChallenge());
 
 function setBuild(t) {
   if (!S) return;
+  if (t && (t === 'wall' || t === 'gate') && hasCurse('nowalls')) { toast('No Walls Pact forbids walls and gates', 'bad'); return; }
+  if (t && optionLocked(t)) { toast('God of Choice locked this option', 'bad'); return; }
   if (S.sel) S.sel = null;
   if (S.build === 'demolish' && t !== 'demolish') unmarkAllDemo();
   wallDrag = null;
@@ -423,11 +870,11 @@ function setBuild(t) {
   bb.querySelector('b').textContent = t ? 'Cancel' : 'Build';
   bb.querySelector('i').textContent = t ? NICE[t] : 'menu';
   if (!t) { $('hint').textContent = ''; lookFree = false; }
-  else if (t === 'wall') $('hint').textContent = `Drag to lay a Wall · ${COST.wall} coins each · drag to a screen edge to scroll, two fingers to look around · Cancel to stop`;
-  else if (t === 'gate') $('hint').textContent = `Tap to place a Gate, or tap a Wall to swap · ${COST.gate} coins · drag to look around`;
+  else if (t === 'wall') $('hint').textContent = `Drag to lay a Wall · ${buildCost('wall')} coins each · drag to a screen edge to scroll, two fingers to look around · Cancel to stop`;
+  else if (t === 'gate') $('hint').textContent = `Tap to place a Gate, or tap a Wall to swap · ${buildCost('gate')} coins · drag to look around`;
   else if (t === 'clear') $('hint').textContent = `Tap a tree or rock near you to clear it · ${TUNE.treeCost} coin for a tree, ${TUNE.rockCost} for a rock, taken from your purse · tap again to cancel and refund · trees drop ${TUNE.treeCoin} coins, rocks ${TUNE.rockCoin} · drag to look around`;
   else if (t === 'demolish') $('hint').textContent = `Tap a building near you to mark it for demolish — free, no refund · tap again or Cancel to unmark · the Keep cannot be demolished · drag to look around`;
-  else $('hint').textContent = `Tap your land to order a ${NICE[t]} · ${COST[t]} coins · drag to look around`;
+  else $('hint').textContent = `Tap your land to order a ${NICE[t]} · ${buildCost(t)} coins · drag to look around`;
 }
 function isStandType(t) { return !!TOOL[t]; }
 function rackedToolCount(st) { return Math.max(0, Math.min((st && st.tools) || 0, TUNE.standMax)); }
@@ -451,6 +898,7 @@ function followCam(dt) {
   lookY += (m.y - lookY) * k;
 }
 function showMenu(on) {
+  if (on) refreshBuildMenu();
   $('buildMenu').hidden = !on;
   $('btnBuild').classList.toggle('open', !!on);
 }
@@ -697,7 +1145,7 @@ function finishDemo(b) {
   const label = NICE[b.tool] || NICE[b.type] || 'Building';
   const stock = (b.tool && (b.tools || 0) > 0) ? b.tools : 0;
   const leftover = (b.tool ? (b.paid || 0) : 0);
-  const coins = (b.tool ? stock * (TOOL[b.tool] ? TOOL[b.tool].cost : 0) + leftover : 0);
+  const coins = (b.tool ? stock * (TOOL[b.tool] ? toolStockCost(b.tool) : 0) + leftover : 0);
   for (const f of S.folk) {
     if (f.job === b) { if (b.farmer === f) b.farmer = null; f.job = null; }
     if (f.stand === b) f.stand = null;
@@ -765,6 +1213,8 @@ function finishClear(obj) {
   for (const f of S.folk) if (f.job === obj) f.job = null;
 }
 function placeBlocked(type, x, y, extra) {
+  if ((type === 'wall' || type === 'gate') && hasCurse('nowalls')) return 'No Walls Pact forbids walls and gates';
+  if (optionLocked(type)) return 'God of Choice locked this option';
   if (x < 20 || y < 20 || x > W - 20 || y > H - 20) return 'Out of bounds';
   const rid = regionIdAt(x, y), r = S.regions[rid];
   if (!r || r.owner !== 'player') return 'You can only build in captured land';
@@ -792,10 +1242,14 @@ function placeBlocked(type, x, y, extra) {
   for (const t of S.trees) if (dist(t, { x, y }) < (t.r || 16) + rr + 2) return 'Clear the tree first';
   for (const rk of S.rocks) if (dist(rk, { x, y }) < (rk.r || 12) + rr + 2) return 'Clear the rock first';
   for (const m of (S.mines || [])) if (dist(m, { x, y }) < (m.r || 22) + rr + 4) return 'Too close to a mine';
+  for (const ru of (S.rubble || [])) {
+    if (S.day < ru.unlockDay && dist(ru, { x, y }) < (ru.r || 16) + rr) return 'Rubble — wait until day ' + ru.unlockDay;
+  }
   return null;
 }
 function swapWallForGate(wall) {
-  const fee = Math.max(0, TUNE.gateCost - COST.wall);
+  if (hasCurse('nowalls') || optionLocked('gate')) return toast('No Walls Pact forbids walls and gates', 'bad');
+  const fee = Math.max(0, buildCost('gate') - buildCost('wall'));
   if (S.coins < fee) return toast(fee ? `Need ${fee} coins to swap in a Gate` : 'Cannot swap', 'bad');
   if (fee) { S.coins -= fee; floatTxt(wall.x, wall.y - 30, '-' + fee, '#ffb0a0'); }
   wall.type = 'gate';
@@ -808,12 +1262,13 @@ function swapWallForGate(wall) {
 }
 function placeBld(type, x, y) {
   const rid = regionIdAt(x, y);
-  S.coins -= COST[type];
+  S.coins -= buildCost(type);
   const b = mkBld(type, x, y, rid, 0);
   if (isStandType(type)) { b.tool = type; b.paid = 0; b.tools = 0; S.stands.push(b); }
   S.buildings.push(b);
+  if (S.rubble && S.rubble.length) S.rubble = S.rubble.filter(ru => dist(ru, b) > (ru.r || 16) + (b.r || 16));
   markNavDirty();
-  floatTxt(x, y - 30, '-' + COST[type], '#ffb0a0');
+  floatTxt(x, y - 30, '-' + buildCost(type), '#ffb0a0');
   return b;
 }
 function tryPlace(type, x, y) {
@@ -825,7 +1280,7 @@ function tryPlace(type, x, y) {
   }
   const why = placeBlocked(type, x, y);
   if (why) return toast(why, 'bad');
-  if (S.coins < COST[type]) return toast(`Need ${COST[type]} coins`, 'bad');
+  if (S.coins < buildCost(type)) return toast(`Need ${buildCost(type)} coins`, 'bad');
   const b = placeBld(type, x, y);
   const nb = S.folk.filter(f => f.role === 'builder').length;
   toast(nb ? `${NICE[type]} ordered — a Builder is on the way` : `${NICE[type]} ordered — buy a hammer to get a Builder`, nb ? '' : 'bad');
@@ -843,10 +1298,10 @@ function planWallLine(x0, y0, x1, y1) {
   let paid = 0;
   for (const pt of pts) {
     const why = placeBlocked('wall', pt.x, pt.y, { others });
-    const afford = !why && S.coins >= paid + COST.wall;
+    const afford = !why && S.coins >= paid + buildCost('wall');
     const ok = !why && afford;
     planned.push({ x: pt.x, y: pt.y, ok, why: why || (afford ? null : 'Need more coins') });
-    if (ok) { others.push({ x: pt.x, y: pt.y, r: BLD.wall.r }); paid += COST.wall; }
+    if (ok) { others.push({ x: pt.x, y: pt.y, r: BLD.wall.r }); paid += buildCost('wall'); }
   }
   return planned;
 }
@@ -860,7 +1315,7 @@ function commitWallLine(plan) {
   }
   let n = 0;
   for (const pt of ok) {
-    if (S.coins < COST.wall) break;
+    if (S.coins < buildCost('wall')) break;
     if (placeBld('wall', pt.x, pt.y)) n++;
   }
   if (n) {
@@ -906,9 +1361,13 @@ function houseSlotsOf(b) {
 function farmCoinsOf(b) {
   const lv = Math.max(1, Math.min(3, (b && b.level) || 1));
   const arr = TUNE.farmCoinsByLevel || [TUNE.farmCoins || 1, 2, 3];
-  return arr[lv - 1] || 1;
+  return (arr[lv - 1] || 1) + (hasBless('fields') ? (TUNE.blessFieldCoins || 1) : 0);
 }
-function upgradeCostTo(lv) { return (TUNE.upgradeCost && TUNE.upgradeCost[lv]) || (lv === 2 ? 12 : 20); }
+function upgradeCostTo(lv, b) {
+  let c = (TUNE.upgradeCost && TUNE.upgradeCost[lv]) || (lv === 2 ? 12 : 20);
+  if (b && b.type === 'tower' && hasCurse('notowers')) c = Math.round(c * (TUNE.curseNoTowerMul || 3));
+  return c;
+}
 function pathIndex(lv) { return lv <= 2 ? 0 : 1; }
 function towerCombat(b) {
   const lv = b.level || 1, path = b.path;
@@ -938,6 +1397,9 @@ function applyTier(b, init) {
   else if (b.type === 'tower') {
     const c = towerCombat(b); max = c.hp; r = c.r;
   } else if (BLD[b.type]) { max = BLD[b.type].hp; r = BLD[b.type].r; }
+  if ((b.type === 'wall' || b.type === 'gate') && hasBless('stone')) max = Math.round(max * (TUNE.blessStoneHp || 1.4));
+  if (b.owner !== 'pale' && b.type !== 'core' && allyHpMul() !== 1) max = Math.round(max * allyHpMul());
+  else if (b.type === 'core' && isPlayerKeep(b) && allyHpMul() !== 1) max = Math.round(max * allyHpMul());
   b.max = max; b.r = r;
   if (init) b.hp = (b.built >= 1 || b.type === 'core') ? max : Math.ceil(max * 0.15);
   else if (max > prevMax) b.hp = Math.min(max, (b.hp || 0) + (max - prevMax));
@@ -976,10 +1438,25 @@ function upgradeNeed(target, levelTo) {
   }
   const isKeep = isPlayerKeep(target);
   if (!isKeep && lv > keepLevel()) return { ok: false, lock: 'keep', reason: 'Need Keep Lv ' + lv };
+  const choiceWhy = (function () {
+    if (!hasCurse('choice')) return null;
+    if (isPlayerKeep(target) && optionLocked('upgrade-keep')) return 'Keep upgrades are locked this run';
+    if (target.type === 'house' && optionLocked('upgrade-house')) return 'House upgrades are locked this run';
+    if ((target.type === 'wall' || target.type === 'gate') && optionLocked('upgrade-wall')) return 'Wall upgrades are locked this run';
+    if (target.type === 'farm' && optionLocked('upgrade-farm')) return 'Farm upgrades are locked this run';
+    if (target.type === 'tower') {
+      const p = target.path || target._pickPath;
+      if (p === 'cannon' && optionLocked('upgrade-tower-cannon')) return 'Cannon upgrades are locked this run';
+      if (p === 'ballista' && optionLocked('upgrade-tower-ballista')) return 'Ballista upgrades are locked this run';
+      if (!p && optionLocked('upgrade-tower-cannon') && optionLocked('upgrade-tower-ballista')) return 'Tower upgrades are locked this run';
+    }
+    return null;
+  })();
+  if (choiceWhy) return { ok: false, lock: 'choice', reason: choiceWhy };
   const mat = lv === 2 ? 'stone' : 'iron';
   if (!mineOwned(mat)) return { ok: false, lock: 'mine', reason: 'Need an owned ' + mat + ' mine' };
   if (!materialReady(mat)) return { ok: false, lock: 'miner', reason: 'Need a miner at the ' + mat + ' mine' };
-  return { ok: true, lock: null, reason: '', mat, levelTo: lv, cost: upgradeCostTo(lv) };
+  return { ok: true, lock: null, reason: '', mat, levelTo: lv, cost: upgradeCostTo(lv, target) };
 }
 function wallConnected(start) {
   if (!start || (start.type !== 'wall' && start.type !== 'gate')) return [start];
@@ -1224,7 +1701,7 @@ function applyClaim(t) {
   }
   if (t.tool) {
     t.paid++;
-    const c = TOOL[t.tool].cost;
+    const c = toolStockCost(t.tool);
     if (t.paid >= c) {
       t.paid = 0; t.tools++; S.stats.tools++;
       floatTxt(t.x + 28, t.y - 70, TOOL[t.tool].label + ' ready!', '#d6ffb0');
@@ -1631,7 +2108,8 @@ function becomeRole(f, role) {
   S.stats.roles++;
   if (role === 'archer') {
     f.dead = true;
-    S.archers.push({ type: 'archer', x: f.x, y: f.y, r: 10, hp: 40, max: 40, cd: 0, follow: false, post: null, slotA: Math.random() * 6.28 });
+    const ahp = Math.round(40 * allyHpMul());
+    S.archers.push({ type: 'archer', x: f.x, y: f.y, r: 10, hp: ahp, max: ahp, cd: 0, follow: false, post: null, slotA: Math.random() * 6.28 });
   } else { f.role = role; f.job = null; f.tx = null; }
   const nice = role === 'archer' ? 'Archer' : role === 'builder' ? 'Builder' : role === 'miner' ? 'Miner' : 'Farmer';
   floatTxt(f.x + 22, f.y - 52, 'Now a ' + nice, '#d6ffb0');
@@ -1640,12 +2118,13 @@ function becomeRole(f, role) {
 function updateFolk(dt) {
   if (S.camp) {
     S.vagrantT -= dt;
-    if (S.vagrantT <= 0) { S.vagrantT = TUNE.vagrantEvery; if (S.folk.filter(f => f.role === 'vagrant').length < TUNE.vagrantMax) spawnVagrant(); }
+    if (S.vagrantT <= 0) { S.vagrantT = vagrantEvery(); if (S.folk.filter(f => f.role === 'vagrant').length < vagrantMax()) spawnVagrant(); }
   }
   const hc = homeCore(), night = S.phase === 'night', sp = TUNE.folkSpeed;
   for (const f of S.folk) {
     f.working = false;
     if (f.role === 'vagrant') { if (S.camp) wanderAround(f, S.camp.x, S.camp.y + 10, 60, dt, sp); continue; }
+    if (hasCurse('death') && night) { continue; }
     if (f.send) {
       const d = dist(f, f.send);
       if (d <= 12) f.send = null;
@@ -1693,21 +2172,21 @@ function updateFolk(dt) {
         else {
           f.working = true;
           if (isDemoJob(j)) {
-            j.demoProg = Math.min(1, (j.demoProg || 0) + dt / (TUNE.demoTime || 4));
+            j.demoProg = Math.min(1, (j.demoProg || 0) + dt / ((TUNE.demoTime || 4) * workSpeed()));
             if (j.demoProg >= 1) { finishDemo(j); f.job = null; }
           } else if (isUpgradeJob(j)) {
-            j.prog = Math.min(1, (j.prog || 0) + dt / (TUNE.upgradeTime || 6));
+            j.prog = Math.min(1, (j.prog || 0) + dt / ((TUNE.upgradeTime || 6) * workSpeed()));
             if (j.prog >= 1) { finishUpgrade(j); f.job = null; }
           } else if (isClearJob(j)) {
             const kind = decorKind(j);
-            j.prog = Math.min(1, (j.prog || 0) + dt / (TUNE.clearTime[kind] || 4));
+            j.prog = Math.min(1, (j.prog || 0) + dt / ((TUNE.clearTime[kind] || 4) * workSpeed()));
             if (j.prog >= 1) { finishClear(j); f.job = null; }
           } else if (j.built != null && j.built < 1) {
-            j.built = Math.min(1, j.built + dt / TUNE.buildTime[j.type]);
+            j.built = Math.min(1, j.built + dt / (TUNE.buildTime[j.type] * workSpeed()));
             j.hp = Math.max(j.hp, Math.ceil(j.max * Math.max(0.15, j.built)));
             if (j.built >= 1) { j.hp = j.max; onBuilt(j); f.job = null; }
           } else {
-            j.hp = Math.min(j.max, j.hp + TUNE.repairRate * dt);
+            j.hp = Math.min(j.max, j.hp + repairSpeed() * dt);
             if (j.hp >= j.max) { floatTxt(j.x, j.y - 36, 'Repaired', '#d6ffb0'); f.job = null; }
           }
         }
@@ -1799,7 +2278,8 @@ function startNight() {
   const n0 = TUNE.waveBase + TUNE.wavePerNight * S.nights + TUNE.wavePerRegion * Math.max(0, owned().length - 1);
   // Necromancer only on every 10th day (10, 20, 30…), leading a larger blood-moon wave.
   const necroNight = S.day > 0 && S.day % 10 === 0;
-  const n = Math.max(0, Math.round(n0 * (necroNight ? (TUNE.necroWaveMul || 2) : 1)));
+  let n = Math.max(0, Math.round(n0 * (necroNight ? (TUNE.necroWaveMul || 2) : 1)));
+  if (hasCurse('wasp') && S.nights < (TUNE.curseWaspNights || 3)) n = Math.round(n * (TUNE.curseWaspCount || 2));
   const q = [];
   for (let i = 0; i < n; i++) q.push(Math.random() < 0.5 ? 'shambler' : 'skeleton');
   if (necroNight && q.length) {
@@ -1810,6 +2290,11 @@ function startNight() {
   if (!q.length) { S.phase = 'day'; S.phaseT = DAY; S.spawnQ = []; return; }
   S.phase = 'night'; S.phaseT = 0;
   S.spawnQ = q; S.spawnGap = Math.min(1.0, 16 / q.length); S.spawnT = 0.5;
+  if (hasCurse('wasp') && S.nights < (TUNE.curseWaspNights || 3)) S.spawnGap /= (TUNE.curseWaspSpawn || 1.25);
+  S.spawnIndex = 0; S.returnQ = [];
+  snapshotNightBuildings();
+  S.lastSpawnAt = S.t;
+  if (isChallenge()) noteUnlock(S.nights + 1);
   pickFocus();
   pickWaveSide();
   S.waveSrc = waveEntryPoint(S.waveSide);
@@ -1841,28 +2326,42 @@ function pickFocus() {
   o.sort((a, b) => score(a) - score(b)); S.focus = o[0].id;
 }
 function startDay() {
+  if (isChallenge()) recordNightScore();
   S.phase = 'day'; S.phaseT = DAY; S.nights++; S.day++; S.spawnQ = []; S.nightSpawned = false;
   for (const u of S.undead) S.fx.push({ k: 'puff', x: u.x, y: u.y, t: 0.6, t0: 0.6 });
-  S.undead = []; S.leader = null; S.chaos = false;
-  S.monarch.hp = Math.min(S.monarch.max, S.monarch.hp + 40);
+  S.undead = []; S.leader = null; S.chaos = false; S.returnQ = [];
+  const heal = 40 + (hasBless('rest') ? (TUNE.blessDawnHeal || 80) : 0);
+  S.monarch.hp = Math.min(S.monarch.max, S.monarch.hp + heal);
   S.bloodMoon = false;
   toast(`Dawn! Night ${S.nights} survived — the dead crumble`, 'good');
   if (S.day % 10 === 9) toast('The Necromancer comes tomorrow night', 'bad');
+  if (isChallenge()) {
+    noteUnlock(S.nights);
+    if (S.nights >= (TUNE.challengeNights || 20)) { challengeVictory(); return; }
+  }
 }
 function raiseDead(n) {
-  const s = UNDEAD.skeleton;
+  const m = enemyMods('skeleton', null);
   const u = { type: 'undead', kind: 'skeleton', x: clamp(n.x + (Math.random() - .5) * 50, 10, W - 10), y: clamp(n.y + (Math.random() - .5) * 50, 10, H - 10),
-    r: s.r, hp: s.hp, max: s.hp, speed: s.speed, dmg: s.dmg, cd: 0.5, tgt: null, rt: 0, jit: (Math.random() - .5) };
+    r: m.r, hp: m.hp, max: m.hp, speed: m.speed, dmg: m.dmg, coin: m.coin, cd: 0.5, tgt: null, rt: 0, jit: (Math.random() - .5), raised: true };
   S.undead.push(u); S.stats.spawned++; S.stats.raised++; S.nightSpawned = true;
   S.fx.push({ k: 'puff', x: u.x, y: u.y, t: 0.5, t0: 0.5 });
 }
-function spawnUndead(kind) {
-  const src = waveEntryPoint(S.waveSide || pickWaveSide());
-  const s = UNDEAD[kind];
-  const u = { type: 'undead', kind, x: clamp(src.x + (rand() - .5) * 120, 10, W - 10), y: clamp(src.y + (rand() - .5) * 120, 10, H - 10),
-    r: s.r, hp: s.hp, max: s.hp, speed: s.speed * (0.9 + rand() * 0.2), dmg: s.dmg, cd: 0, tgt: null, rt: 0, jit: (rand() - .5) };
+function spawnUndead(kind, at, returned) {
+  const src = at || (hasCurse('chaos') ? chaosSpawnPoint() : waveEntryPoint(S.waveSide || pickWaveSide()));
+  const idx = returned ? null : (S.spawnIndex++);
+  const m = enemyMods(kind, idx);
+  const jitter = at ? 8 : 120;
+  const u = { type: 'undead', kind, x: clamp(src.x + (rand() - .5) * jitter, 10, W - 10), y: clamp(src.y + (rand() - .5) * jitter, 10, H - 10),
+    r: m.r, hp: m.hp, max: m.hp, speed: m.speed * (0.9 + rand() * 0.2), dmg: m.dmg, coin: m.coin, elite: m.elite,
+    rangeMul: m.rangeMul || 1, cdMul: m.cdMul || 1,
+    cd: hasCurse('chaos') && !returned ? (TUNE.curseChaosDelay || 3) : 0,
+    atkWait: hasCurse('chaos') && !returned ? (TUNE.curseChaosDelay || 3) : 0,
+    tgt: null, rt: 0, jit: (rand() - .5), returned: !!returned };
   S.undead.push(u); S.stats.spawned++; S.nightSpawned = true;
+  S.lastSpawnAt = S.t;
   if (kind === 'necro') { S.leader = u; toast('A Necromancer leads this wave!', 'bad'); }
+  return u;
 }
 
 // ---------- enemies ----------
@@ -1876,9 +2375,13 @@ function damage(e, dmg) {
   e.flash = 0.12;
   if (e.hp > 0) return;
   if (e.type === 'undead') {
-    S.undead.splice(S.undead.indexOf(e), 1); S.kills++; S.coins += UNDEAD[e.kind].coin;
+    const coin = e.coin != null ? e.coin : UNDEAD[e.kind].coin;
+    S.undead.splice(S.undead.indexOf(e), 1); S.kills++; S.coins += coin;
     S.fx.push({ k: 'puff', x: e.x, y: e.y, t: 0.5, t0: 0.5 });
-    S.fx.push({ k: 'coins', x: e.x, y: e.y - 4, t: 0.8, t0: 0.8, n: UNDEAD[e.kind].coin });
+    S.fx.push({ k: 'coins', x: e.x, y: e.y - 4, t: 0.8, t0: 0.8, n: coin });
+    if (hasCurse('afterlife') && e.kind !== 'necro' && !e.returned && S.phase === 'night') {
+      (S.returnQ || (S.returnQ = [])).push({ kind: e.kind, x: e.x, y: e.y, t: TUNE.curseAfterlifeDelay || 4 });
+    }
     if (e.kind === 'necro') {
       S.chaos = true; S.leader = null;
       const r = S.regions[regionIdAt(e.x, e.y)];
@@ -1895,6 +2398,9 @@ function damage(e, dmg) {
   } else if (e.type === 'core') {
     loseRegion(S.regions[e.region]);
   } else if (BLD[e.type] && S.buildings.includes(e)) {
+    if (hasCurse('destruction') && e.owner === 'player' && (e.built || 0) >= 1) {
+      (S.rubble || (S.rubble = [])).push({ x: e.x, y: e.y, type: e.type, region: e.region, unlockDay: S.day + (TUNE.curseDestroyWait || 2), r: e.r || 16 });
+    }
     S.buildings.splice(S.buildings.indexOf(e), 1);
     const si = S.stands.indexOf(e); if (si >= 0) S.stands.splice(si, 1);
     markNavDirty();
@@ -1934,7 +2440,16 @@ function loseRegion(r) {
   S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05, bad: 1 });
   S.buildings = S.buildings.filter(b => !(b.region === r.id && b.built < 1)); // unfinished scaffolds collapse
   S.stands = S.stands.filter(st => S.buildings.includes(st) || st.region !== r.id);
-  for (const b of S.buildings) if (b.region === r.id) { b.owner = 'pale'; b.hp = Math.max(b.hp, b.max * 0.5); if (b.farmer) b.farmer = null; }
+  for (const b of S.buildings) if (b.region === r.id) {
+    b.owner = 'pale';
+    if (hasCurse('range') && (b.type === 'tower' || b.type === 'fort')) {
+      b.max = Math.round(b.max * (TUNE.curseRangeHp || 2));
+      b.rangeMul = TUNE.curseRangeRng || 1.7;
+      b.dmgMul = TUNE.curseRangeDmg || 1.4;
+      b.cdMul = TUNE.curseRangeCd || 0.7;
+    }
+    b.hp = Math.max(b.hp, b.max * 0.5); if (b.farmer) b.farmer = null;
+  }
   for (const m of (S.mines || [])) if (m.region === r.id) { if (m.miner && m.miner.job === m) m.miner.job = null; m.miner = null; }
   for (const a of S.archers.slice()) if (regionIdAt(a.x, a.y) === r.id && dist(a, S.monarch) > 300) S.archers.splice(S.archers.indexOf(a), 1);
   const hp = r.weakened ? 220 : 360;
@@ -1955,10 +2470,40 @@ function retakeRegion(r) {
 function gameOver(why) {
   if (S.over) return; S.over = true;
   $('overTitle').textContent = why;
-  $('overStats').innerHTML = `Nights survived: <b>${S.nights}</b><br>Regions held: <b>${owned().length}</b><br>Undead slain: <b>${S.kills}</b>`;
+  if (isChallenge()) {
+    noteUnlock(S.nights);
+    syncChallengeScore();
+    $('overStats').innerHTML = `Nights survived: <b>${S.nights}</b> / ${TUNE.challengeNights}<br>Regions held: <b>${owned().length}</b><br>Undead slain: <b>${S.kills}</b>`;
+    paintScoreBreakdown(S.score, false);
+    $('btnRestart').hidden = true;
+    $('btnRetry').hidden = false;
+    $('btnMenu').hidden = false;
+  } else {
+    $('overStats').innerHTML = `Nights survived: <b>${S.nights}</b><br>Regions held: <b>${owned().length}</b><br>Undead slain: <b>${S.kills}</b>`;
+    if ($('overScore')) { $('overScore').hidden = true; $('overScore').innerHTML = ''; }
+    $('btnRestart').hidden = false;
+    $('btnRetry').hidden = true;
+    $('btnMenu').hidden = true;
+  }
   $('over').hidden = false;
   clearToasts();
   $('bar').hidden = true; showMenu(false); if (S) S.dropHold = false;
+  $('hint').textContent = '';
+}
+function challengeVictory() {
+  if (!S || S.over) return;
+  S.over = true;
+  noteUnlock(S.nights);
+  syncChallengeScore();
+  $('overTitle').textContent = 'The realm stands';
+  $('overStats').innerHTML = `All ${TUNE.challengeNights} nights survived.<br>Regions held: <b>${owned().length}</b><br>Undead slain: <b>${S.kills}</b>`;
+  paintScoreBreakdown(S.score, true);
+  $('btnRestart').hidden = true;
+  $('btnRetry').hidden = false;
+  $('btnMenu').hidden = false;
+  $('over').hidden = false;
+  clearToasts();
+  $('bar').hidden = true; showMenu(false); S.dropHold = false;
   $('hint').textContent = '';
 }
 
@@ -2029,7 +2574,7 @@ function edgeScrollWall(dt) {
   wallDrag.x1 = w.x; wallDrag.y1 = w.y;
 }
 function update(dt) {
-  if (S.over) return;
+  if (!S || S.over) return;
   ensureNav();
   nav.repaths = 0;
   followCam(dt);
@@ -2064,7 +2609,15 @@ function update(dt) {
   if (m.cd <= 0) {
     let tgt = m.target && dist(m.target, m) - m.target.r <= 75 ? m.target : null;
     if (!tgt) { let bd = 75; for (const e of enemies) { const d = dist(e, m) - e.r; if (d < bd) { bd = d; tgt = e; } } }
-    if (tgt) { m.cd = 0.45; S.fx.push({ k: 'slash', x: m.x, y: m.y, tx: tgt.x, ty: tgt.y, t: 0.18, t0: 0.18 }); damage(tgt, 22); if (S.over) return; }
+    if (tgt) {
+      const md = monarchDamage();
+      m.cd = 0.45;
+      if (md > 0) {
+        S.fx.push({ k: 'slash', x: m.x, y: m.y, tx: tgt.x, ty: tgt.y, t: 0.18, t0: 0.18 });
+        damage(tgt, md);
+      }
+      if (S.over) return;
+    }
   }
   for (const e of enemies) if (dist(e, m) < 260) { near = true; break; }
   if (!near && S.phase === 'day') m.hp = Math.min(m.max, m.hp + TUNE.monarchRegen * dt);
@@ -2086,7 +2639,14 @@ function update(dt) {
     b.cd -= dt; if (b.cd > 0) return;
     const shotSpr = (b.type === 'tower' && (b.level || 1) >= 2) ? getSprite('projectile-' + (b.path === 'ballista' ? 'bolt' : 'cannonball') + '-' + ((b.level || 1) >= 3 ? 'iron' : 'stone')) : null;
     const shots = (b.type === 'fort' && owner === 'player') ? (TUNE.fortArchers[(b.level || 1) - 1] || 1) : 1;
-    const range = spec.range, dmg = spec.dmg, cd = spec.cd, aoe = spec.aoe || 0, pierce = spec.pierce || 0;
+    let range = spec.range, dmg = spec.dmg, cd = spec.cd; const aoe = spec.aoe || 0, pierce = spec.pierce || 0;
+    if (owner === 'player') { dmg *= allyDmgMul(); }
+    else {
+      if (b.rangeMul) range *= b.rangeMul;
+      if (b.dmgMul) dmg *= b.dmgMul;
+      if (b.cdMul) cd *= b.cdMul;
+      if (!b.rangeMul && hasCurse('range')) { range *= (TUNE.curseRangeRng || 1.7); dmg *= (TUNE.curseRangeDmg || 1.4); cd *= (TUNE.curseRangeCd || 0.7); }
+    }
     const ay = b.y - (b.type === 'fort' ? 40 : b.type === 'core' ? 48 : 30);
     if (owner === 'player') {
       const foes = S.undead.slice();
@@ -2135,7 +2695,7 @@ function update(dt) {
     }
   }
   const hk = homeCore();
-  if (hk && isPlayerKeep(hk) && (hk.level || 1) >= 2) fireTower(hk, 'player', { range: 220, dmg: 12, cd: 0.9, aoe: 0, pierce: 0 });
+  if (hk && isPlayerKeep(hk) && (hk.level || 1) >= 2) fireTower(hk, 'player', { range: 220, dmg: 12 * allyDmgMul(), cd: 0.9, aoe: 0, pierce: 0 });
 
   updateDrops(dt);
   updateFolk(dt);
@@ -2164,18 +2724,33 @@ function update(dt) {
     const d = Math.hypot(tx - a.x, ty - a.y);
     if (d > 4) followRoute(a, tx, ty, spd, dt, true);
     a.cd -= dt;
-    if (a.cd <= 0) {
-      let best = null, bd = 210;
+    if (hasCurse('death') && S.phase === 'night') { /* archers stand down at night */ }
+    else if (a.cd <= 0) {
+      let best = null, bd = archerRangeOf();
       for (const e of enemies) { if (!S.undead.includes(e) && !S.guardians.includes(e) && !(e.owner === 'pale')) continue; const dd = dist(e, a); if (dd < bd) { bd = dd; best = e; } }
-      if (best) { a.cd = 0.9; S.fx.push({ k: 'arrow', x: a.x, y: a.y - 8, tx: best.x, ty: best.y - 6, t: 0.22, t0: 0.22, c: '#fff6e0' }); damage(best, 9); if (S.over) return; }
+      if (best) { a.cd = 0.9; S.fx.push({ k: 'arrow', x: a.x, y: a.y - 8, tx: best.x, ty: best.y - 6, t: 0.22, t0: 0.22, c: '#fff6e0' }); damage(best, archerDamage()); if (S.over) return; }
     }
   });
 
   // undead
   const playerBlds = S.buildings.filter(b => b.owner === 'player' && b.built >= 1 && b.type !== 'farm');
   const dmgK = (!S.chaos && S.leader) ? TUNE.leaderDmg : 1;
+  if (S.returnQ && S.returnQ.length && S.phase === 'night') {
+    for (const r of S.returnQ.slice()) {
+      r.t -= dt;
+      if (r.t <= 0) {
+        S.returnQ.splice(S.returnQ.indexOf(r), 1);
+        const u = spawnUndead(r.kind, { x: r.x, y: r.y }, true);
+        if (u) S.fx.push({ k: 'puff', x: u.x, y: u.y, t: 0.5, t0: 0.5 });
+      }
+    }
+  }
   for (const u of S.undead.slice()) {
     if (!S.undead.includes(u)) continue;
+    if (hasCurse('phoenix') && u.kind !== 'necro' && u.hp < u.max) {
+      u.hp = Math.min(u.max, u.hp + Math.min(TUNE.cursePhoenixCap || 15, u.max * (TUNE.cursePhoenixRate || 0.04)) * dt);
+    }
+    if (u.atkWait > 0) u.atkWait -= dt;
     u.rt -= dt;
     if (u.rt <= 0 || (u.tgt && u.tgt.hp <= 0)) { u.rt = 0.4 + Math.random() * 0.3; u.tgt = pickUndeadTarget(u, playerBlds); }
     const t = u.tgt;
@@ -2193,7 +2768,7 @@ function update(dt) {
     }
     u.cd -= dt;
     if (u.kind === 'necro' && !S.chaos) { u.raiseT = (u.raiseT == null ? TUNE.necroRaiseEvery : u.raiseT) - dt; if (u.raiseT <= 0) { u.raiseT = TUNE.necroRaiseEvery; raiseDead(u); } }
-    if (blocked && u.cd <= 0 && u.kind !== 'necro') {
+    if (blocked && u.cd <= 0 && u.kind !== 'necro' && !(u.atkWait > 0)) {
       u.cd = 1; damage(blocked, u.dmg * dmgK);
       S.fx.push({ k: 'hit', x: blocked.x, y: blocked.y, t: 0.15, t0: 0.15 });
       if ((blocked.type === 'wall' || blocked.type === 'gate') && (blocked.level || 1) >= 3 && S.undead.includes(u)) {
@@ -2202,7 +2777,7 @@ function update(dt) {
       }
       if (S.over) return;
     }
-    if (u.kind === 'necro' && dist(u, m) < 140 && u.cd <= 0) { u.cd = 1.3; S.fx.push({ k: 'arrow', x: u.x, y: u.y - 10, tx: m.x, ty: m.y - 8, t: 0.24, t0: 0.24, c: '#c6ff8a', bolt: 1 }); damage(m, u.dmg); if (S.over) return; }
+    if (u.kind === 'necro' && dist(u, m) < 140 * (u.rangeMul || 1) && u.cd <= 0) { u.cd = 1.3 * (u.cdMul || 1); S.fx.push({ k: 'arrow', x: u.x, y: u.y - 10, tx: m.x, ty: m.y - 8, t: 0.24, t0: 0.24, c: '#c6ff8a', bolt: 1 }); damage(m, u.dmg); if (S.over) return; }
   }
 
   const nk = S.phase === 'night' ? 1 : 0;
@@ -4964,7 +5539,7 @@ function drawStand(st) {
     for (let i = 0; i < n; i++) ctx.drawImage(ic.c, x0 + i * gap, y, w, h);
   }
   st._racked = n;
-  const c = TOOL[st.tool].cost;
+  const c = toolStockCost(st.tool);
   if (st.paid > 0) for (let i = 0; i < c; i++) {
     ctx.globalAlpha = i < st.paid ? 1 : 0.3;
     ctx.drawImage(Art.coin.c, st.x - (c * 9) / 2 + i * 9, st.y - 46, 9, 9);
@@ -5097,7 +5672,8 @@ function drawTowerPathButtons(lead, wx, wy, gate) {
   ];
   for (let i = 0; i < 2; i++) {
     const x = x0 + i * (bw + gap), y = y0;
-    queueLabel({ kind: 'choice', x, y, w: bw, h: bh, b: lead, path: paths[i].path, label: paths[i].label, sub: paths[i].sub, locked: !!locked, reason });
+    const pathLock = optionLocked('upgrade-tower-' + paths[i].path);
+    queueLabel({ kind: 'choice', x, y, w: bw, h: bh, b: lead, path: paths[i].path, label: paths[i].label, sub: paths[i].sub, locked: !!locked || pathLock, reason: pathLock ? 'God of Choice locked this path' : reason });
   }
 }
 function drawUpgradeChrome() {
@@ -5130,7 +5706,7 @@ function drawWallCostBadge() {
   if (!wallDrag || !wallDrag.plan) return;
   const plan = wallDrag.plan;
   const n = plan.filter(pt => pt.ok).length;
-  const cost = n * COST.wall, afford = S.coins >= cost && n > 0;
+  const cost = n * buildCost('wall'), afford = S.coins >= cost && n > 0;
   const mid = plan[plan.length >> 1] || plan[0];
   const p = w2s(mid.x, mid.y - 36);
   const txt = n ? (n + ' wall' + (n === 1 ? '' : 's') + ' · ' + cost + ' coins') : (plan[0].why || 'Cannot place');
@@ -5475,6 +6051,7 @@ function edgeOf(wx, wy) {
 }
 
 function render() {
+  if (!S) return;
   beginLabels();
   if (S.mapDirty) redrawMap();
   beginView();
@@ -5668,6 +6245,7 @@ function setVal(id, key, v) {
   if (n) n.textContent = v;
 }
 function drawHud() {
+  if (!S) return;
   setVal('hCoins', 'c', String(S.coins));
   if (S.phase === 'day') {
     const t = Math.max(0, Math.ceil(S.phaseT)), mm = (t / 60) | 0, ss = String(t % 60).padStart(2, '0');
@@ -5677,7 +6255,7 @@ function drawHud() {
     setVal('hPhase', 'p', (S.bloodMoon ? 'Blood Moon · ' : 'Night · ') + left);
   }
   $('hPhase').classList.toggle('night', S.phase === 'night');
-  setVal('hNights', 'n', String(S.nights));
+  setVal('hNights', 'n', isChallenge() ? (S.nights + '/' + (TUNE.challengeNights || 20)) : String(S.nights));
   setVal('hRegions', 'r', owned().length + '/' + S.regions.length);
   const hp = Math.max(0, Math.ceil(S.monarch.hp));
   if (hud.hp !== hp) {
@@ -5690,12 +6268,19 @@ function drawHud() {
   $('hWorkers').classList.toggle('full', wk >= cap);
   if (wallDrag && wallDrag.plan) {
     const n = wallDrag.plan.filter(pt => pt.ok).length;
-    const cost = n * COST.wall;
+    const cost = n * buildCost('wall');
     $('hint').textContent = n
       ? (`${n} wall${n === 1 ? '' : 's'} · ${cost} coins` + (S.coins < cost ? ' — not enough' : ' · release to order, Cancel to stop'))
       : ((wallDrag.plan[0] && wallDrag.plan[0].why) || 'Drag to lay a Wall · Cancel to stop');
   } else if (S.build === 'wall' && !$('hint').textContent) {
-    $('hint').textContent = `Drag to lay a Wall · ${COST.wall} coins each · Cancel to stop`;
+    $('hint').textContent = `Drag to lay a Wall · ${buildCost('wall')} coins each · Cancel to stop`;
+  }
+  if (isChallenge() && S.score) {
+    $('hScore').hidden = false;
+    const live = scoreBase(S.score);
+    setVal('hScore', 'sc', live + ' · ' + fmtMult(S.score.multiplier || 1));
+  } else {
+    $('hScore').hidden = true;
   }
   const ra = S.rally ? 'on' : 'off';
   if (hud.ra !== ra) { hud.ra = ra; $('btnRally').querySelector('i').textContent = ra; }
@@ -5709,6 +6294,7 @@ let last = performance.now(), fps = 60;
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   fps = fps * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
+  if (!S) { requestAnimationFrame(frame); return; }
   const steps = Math.max(1, Math.min(40, (window.__bc && window.__bc.timeScale) | 0));
   tickSel();
   for (let i = 0; i < steps && !S.over; i++) update(dt);
@@ -5748,8 +6334,8 @@ window.__bc = {
     return null;
   },
   placeUndead(kind, x, y) {
-    const spec = UNDEAD[kind] || UNDEAD.shambler;
-    const u = { type: 'undead', kind, x, y, r: spec.r, hp: spec.hp, max: spec.hp, speed: spec.speed, dmg: spec.dmg, cd: 0, tgt: null, rt: 0, jit: 0 };
+    const m = enemyMods(kind, null);
+    const u = { type: 'undead', kind, x, y, r: m.r, hp: m.hp, max: m.hp, speed: m.speed, dmg: m.dmg, coin: m.coin, elite: m.elite, cd: 0, tgt: null, rt: 0, jit: 0 };
     S.undead.push(u); S.stats.spawned++;
     return u;
   },
@@ -5761,9 +6347,17 @@ window.__bc = {
   get mines() { return S && S.mines; },
   get choiceBtns() { return S && S._choiceBtns; },
   get visibleLabels() { return S && S._visibleLabels; },
+  CURSES, BLESSINGS, hasCurse, hasBless, loadoutMultiplier, fmtMult,
+  timeBonus, realmBonus, scoreBase, finalScore, enemyMods, buildCost, toolStockCost,
+  showTitle, openLoadout, startEndless, startChallenge,
+  unlockAll, resetUnlocks, readUnlocks, writeUnlocks, noteUnlock,
+  get lastChallenge() { return lastChallenge; },
+  get loadout() { return { curses: [...LO.curses], blessings: [...LO.blessings] }; },
+  setLoadout(curses, blessings) { LO.curses = new Set(curses || []); LO.blessings = new Set(blessings || []); renderLoadout(); },
+  challengeVictory, recordNightScore, syncChallengeScore,
 };
 
 buildArt();
-newGame();
+showTitle();
 requestAnimationFrame(frame);
 })();
