@@ -41,6 +41,12 @@ Each survived night adds three parts, same shape as Thronefall:
 
 Pacifist Pact: the monarch cannot attack; player buildings, archers, and workers have **2× health and 2× damage** (the current game.wiki description of live Thronefall Pacifist Pact). No Walls is a hard ban on walls and gates. No Towers and No Units make those options very expensive rather than banned.
 
+### Fighting over land (Endless, v27)
+Every zone a kingdom owns can have its own **Hall** (a governing building, separate from the kingdom castle in region 0). Wild land has no Hall. Claim it by planting a banner and holding it through the night (the same v23 rules). Capture makes the zone yours and unlocks a Hall build spot — it does **not** place a Hall for you. A Hall costs **8 coins** (`TUNE.hallCost`) and a Builder must finish it, same as any other building.
+
+Until a Hall is built, the zone counts as owned (the owner’s name and color show) but a rival can retake it with a banner, just like wild land. Once the Hall is up, rivals cannot plant a banner; they walk in and fight. Destroying that zone’s Hall transfers the zone and every leftover building to the attacker. The new owner must also pay and build their own Hall. The kingdom castle is not a takeover target in this step. Zone ownership, Hall hit points, and building ownership are server-authoritative and sync live; the owner is alerted when their land is under attack.
+
+
 ## Controls
 - **Drag anywhere** on the map: virtual joystick, the monarch walks that way (WASD/arrows on desktop).
 - **Auto-attack:** the monarch hits the nearest enemy in reach. **Tap an enemy** to focus it.

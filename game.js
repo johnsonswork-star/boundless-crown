@@ -4,8 +4,8 @@
 'use strict';
 const W = 2400, H = 2400, CX = W / 2, CY = H / 2;
 const DAY = 60, NIGHT = 45, CELL = 8, GW = W / CELL, GH = H / CELL;
-const COST = { wall: 4, tower: 12, farm: 8, house: 6 };
-const NICE = { wall: 'Wall', tower: 'Tower', farm: 'Farm', house: 'House', fort: 'Fort', gate: 'Gate', bow: 'Bow stand', hammer: 'Hammer stand', scythe: 'Scythe stand', pick: 'Pickaxe stand', clear: 'Clear', demolish: 'Demolish' };
+const COST = { wall: 4, tower: 12, farm: 8, house: 6, hall: 8 };
+const NICE = { wall: 'Wall', tower: 'Tower', farm: 'Farm', house: 'House', hall: 'Hall', fort: 'Fort', gate: 'Gate', bow: 'Bow stand', hammer: 'Hammer stand', scythe: 'Scythe stand', pick: 'Pickaxe stand', clear: 'Clear', demolish: 'Demolish' };
 const TOOL = {
   bow:    { cost: 4, role: 'archer',  label: 'Bow' },
   hammer: { cost: 3, role: 'builder', label: 'Hammer' },
@@ -22,10 +22,11 @@ const TUNE = {
   gateCost: 6, wallSpacing: 34,
   zoomMin: 0.55, zoomMax: 2.4, zoomStart: 1,
   vagrantEvery: 18, vagrantMax: 4, vagrantStart: 2,
-  buildTime: { wall: 4, tower: 8, farm: 5, house: 6, bow: 5, hammer: 4, scythe: 5, pick: 5, gate: 5 }, repairRate: 14,
+  buildTime: { wall: 4, tower: 8, farm: 5, house: 6, hall: 6, bow: 5, hammer: 4, scythe: 5, pick: 5, gate: 5 }, repairRate: 14,
   farmEvery: 5, farmCoins: 1,    // a worked farm pays farmCoins every farmEvery s, by day
   coreHome: 280, coreCaptured: 150, coreRetaken: 130, coreKeep: 320,
   bannerHp: 200, bannerR: 18, bannerPlantRange: 220,
+  hallCost: 8, hallHp: 220, hallR: 20,
   claimWaveMul: 2,        // counterattack spawn count vs that night's regular wave
   claimFailScale: 0.25,   // +25% enemy count AND +25% HP/damage per failed attempt, compounding per zone
   waveBase: 2, wavePerNight: 7, wavePerRegion: 2,
@@ -141,6 +142,7 @@ const BLD = {
   fort:  { hp: 260, r: 22, range: 220, cd: 0.8, dmg: 13 },
   farm:  { hp: 70, r: 24 },
   house: { hp: 130, r: 18 },
+  hall:  { hp: 220, r: 20 },
   bow:    { hp: 90, r: 16 },
   hammer: { hp: 90, r: 16 },
   scythe: { hp: 90, r: 16 },
@@ -149,6 +151,7 @@ const BLD = {
 };
 Object.assign(COST, TUNE.standCost);
 COST.gate = TUNE.gateCost;
+COST.hall = TUNE.hallCost;
 
 // ---------- Challenge: curses, blessings, score, unlocks ----------
 // Pacifist: monarch cannot attack; player buildings, archers, and workers
@@ -187,7 +190,7 @@ const BLESSINGS = [
   { id: 'sharp', name: 'Sharp Crown', effect: 'The monarch deals 8 more damage', mult: 0.90, unlock: 15 },
   { id: 'stone', name: 'Stone Walls', effect: 'Walls and gates have 40% more health', mult: 0.90, unlock: 15 },
 ];
-const CHOICE_OPTS = ['wall', 'gate', 'tower', 'farm', 'house', 'hammer', 'bow', 'scythe', 'pick',
+const CHOICE_OPTS = ['wall', 'gate', 'tower', 'farm', 'house', 'hall', 'hammer', 'bow', 'scythe', 'pick',
   'upgrade-keep', 'upgrade-house', 'upgrade-wall', 'upgrade-tower-cannon', 'upgrade-tower-ballista', 'upgrade-farm'];
 const UNLOCK_KEY = 'bc-challenge-unlocks';
 let LO = { curses: new Set(), blessings: new Set() };
@@ -999,12 +1002,16 @@ const WORLD = {
   ws: null,
   room: '',
   realms: new Map(),
+  zones: new Map(),
   wanted: false,
   ever: false,
   lastSt: 0,
   lastSig: '',
+  lastPub: 0,
   backoff: 800,
   timer: 0,
+  lastAlert: null,
+  attackAlerts: new Set(),
 };
 
 function myWorldSpawn() {
@@ -1022,6 +1029,285 @@ function monarchLocal(r) {
   return { x: CX + (r.spawn.x + (r.mx - CX) - me.x), y: CY + (r.spawn.y + (r.my - CY) - me.y) };
 }
 function canWalkWorld() { return isWorldLive(); }
+
+const ZONE_PAL = ['#e07a5f', '#81b29a', '#3d7ea6', '#e9c46a', '#9b5de5', '#00bbf9', '#f15bb5', '#f4a261'];
+function kingdomColor(id) {
+  let h = 0;
+  const s = String(id || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return ZONE_PAL[h % ZONE_PAL.length];
+}
+function myKingdomId() { return (CLOUD.kingdom && CLOUD.kingdom.id) || null; }
+function worldFromLocal(x, y, spawn) {
+  const sp = spawn || myWorldSpawn();
+  return { x: (sp.x || 0) + (x - CX), y: (sp.y || 0) + (y - CY) };
+}
+function localFromWorld(wx, wy, spawn) {
+  const sp = spawn || myWorldSpawn();
+  return { x: CX + (wx - (sp.x || 0)), y: CY + (wy - (sp.y || 0)) };
+}
+function zoneKey(homeId, rid) { return String(homeId) + ':' + (rid | 0); }
+function zoneHasHall(r) {
+  if (!r) return false;
+  if (r.gov) return true;
+  const rid = r.id;
+  return S.buildings.some(b => b.type === 'hall' && b.hp > 0 && ((b.region === rid && rid >= 0) || (r.zoneId && b.zoneId === r.zoneId)) && (b.built >= 1 || b.owner === 'rival'));
+}
+function hallOf(rid, zoneId) {
+  return S.buildings.find(b => b.type === 'hall' && b.hp > 0 && ((zoneId && b.zoneId === zoneId) || (rid != null && b.region === rid)));
+}
+function packBldWorld(b) {
+  const w = worldFromLocal(b.x, b.y);
+  return { type: b.type, x: w.x, y: w.y, hp: b.hp, max: b.max, level: b.level || 1, path: b.path || null, built: b.built == null ? 1 : b.built, r: b.r, id: b.id || null };
+}
+function homeZonesPayload() {
+  if (!S || !S.regions || !myKingdomId()) return [];
+  const me = myKingdomId();
+  const out = [];
+  for (const r of S.regions) {
+    if (!r || r.id === 0) continue;
+    const hall = S.buildings.find(b => b.type === 'hall' && b.region === r.id && b.owner === 'player' && b.built >= 1 && b.hp > 0);
+    const pos = worldFromLocal(r.x, r.y);
+    out.push({
+      id: zoneKey(me, r.id),
+      region: r.id,
+      wx: pos.x, wy: pos.y,
+      name: r.name,
+      gov: !!hall,
+      govHp: hall ? hall.hp : null,
+      govMax: hall ? hall.max : null,
+      buildings: S.buildings.filter(b => b.region === r.id && b.type !== 'hall' && b.owner === 'player').map(packBldWorld),
+    });
+  }
+  return out;
+}
+function sendZoneMsg(obj) {
+  const ws = WORLD.ws;
+  if (!ws || ws.readyState !== 1) return false;
+  try { ws.send(JSON.stringify(obj)); return true; } catch (e) { return false; }
+}
+function publishHomeZones() {
+  if (!isEndlessCloud() || !S) return false;
+  const zones = homeZonesPayload();
+  WORLD.lastPub = performance.now();
+  return sendZoneMsg({ t: 'zpub', zones });
+}
+function zoneAct(act, id, extra) {
+  return sendZoneMsg(Object.assign({ t: 'zact', act, id }, extra || {}));
+}
+function owningZoneAt(x, y) {
+  if (!S) return null;
+  const pt = { x, y };
+  if (S.regions && S.regions.length) {
+    const rid = regionIdAt(x, y);
+    const r = S.regions[rid];
+    if (r && r.owner === 'player' && dist(r, pt) < 520) return { home: true, r, rid, x: r.x, y: r.y };
+  }
+  const me = myKingdomId();
+  if (!me || !WORLD.zones) return null;
+  let best = null, bd = 520;
+  for (const z of WORLD.zones.values()) {
+    if (z.state !== 'owned' || z.ownerId !== me) continue;
+    const loc = localFromWorld(z.wx, z.wy);
+    const d = dist(loc, pt);
+    if (d < bd) { bd = d; best = { home: z.homeId === me, z, loc, x: loc.x, y: loc.y }; }
+  }
+  return best;
+}
+function alertZoneAttack(z) {
+  if (!z) return;
+  const key = z.id + ':' + (z.attackerId || 'x');
+  WORLD.attackAlerts = WORLD.attackAlerts || new Set();
+  if (WORLD.attackAlerts.has(key)) return;
+  WORLD.attackAlerts.add(key);
+  WORLD.lastAlert = { id: z.id, name: z.name, attackerId: z.attackerId, at: Date.now() };
+  toast((z.name || 'Your land') + ' is under attack!', 'bad');
+}
+function stripForeign(zoneId) {
+  if (!S) return;
+  S.buildings = S.buildings.filter(b => b.zoneId !== zoneId);
+  S.stands = S.stands.filter(st => S.buildings.includes(st) || st.zoneId !== zoneId);
+}
+function materializeForeignZone(z) {
+  const me = myKingdomId();
+  if (!S || !z || z.homeId === me) return;
+  stripForeign(z.id);
+  const loc = localFromWorld(z.wx, z.wy);
+  z._lx = loc.x; z._ly = loc.y;
+  if (z.gov && z.ownerId && z.ownerId !== me) {
+    const hall = mkBld('hall', loc.x, loc.y, -1, 1);
+    hall.owner = 'rival';
+    hall.zoneId = z.id;
+    hall.foreign = true;
+    hall.hp = z.govHp != null ? z.govHp : hall.max;
+    hall.max = z.govMax != null ? z.govMax : hall.max;
+    S.buildings.push(hall);
+  }
+  for (const raw of (z.buildings || [])) {
+    if (!raw || raw.type === 'hall') continue;
+    const p = localFromWorld(raw.x, raw.y);
+    const b = mkBld(raw.type, p.x, p.y, -1, raw.built == null ? 1 : raw.built);
+    b.owner = (z.ownerId && z.ownerId !== me) ? 'rival' : 'player';
+    b.zoneId = z.id;
+    b.foreign = true;
+    if (raw.hp != null) b.hp = raw.hp;
+    if (raw.max != null) b.max = raw.max;
+    if (raw.level) b.level = raw.level;
+    if (raw.path) b.path = raw.path;
+    if (raw.id) b.id = raw.id;
+    S.buildings.push(b);
+    if (isStandType(raw.type)) { b.tool = raw.type; S.stands.push(b); }
+  }
+}
+function applyHomeParcel(z) {
+  const me = myKingdomId();
+  if (!S || !S.regions || !z || z.homeId !== me) return;
+  const rid = z.region | 0;
+  const r = S.regions[rid];
+  if (!r || rid === 0) return;
+  r.worldOwnerId = z.ownerId;
+  r.worldOwnerName = z.ownerName;
+  r.worldOwnerColor = z.ownerColor;
+  r.gov = !!z.gov;
+  if (z.underAttack && z.ownerId === me) alertZoneAttack(z);
+  if (z.state === 'owned' && z.ownerId && z.ownerId !== me) {
+    if (r.owner === 'player' || r.owner === 'contested') {
+      r.owner = 'rival';
+      r.core = null;
+      r.claimFrom = null;
+      r.claimQueued = false;
+      S.buildings = S.buildings.filter(b => {
+        if (b.region !== r.id) return true;
+        if (b.type === 'hall') return false;
+        b.owner = 'rival';
+        b.zoneId = z.id;
+        return true;
+      });
+      toast((r.name || 'Your land') + ' was taken by ' + (z.ownerName || 'a rival') + '!', 'bad');
+      S.mapDirty = true;
+      markNavDirty();
+    } else if (r.owner !== 'rival') {
+      r.owner = 'rival';
+      S.mapDirty = true;
+    }
+  } else if (z.state === 'owned' && z.ownerId === me) {
+    if (r.owner === 'rival') {
+      r.owner = 'player';
+      S.mapDirty = true;
+    }
+  } else if (z.state === 'contested' && z.claimerId && z.claimerId !== me && r.owner === 'player' && !zoneHasHall(r)) {
+    toast((z.name || r.name) + ' is being claimed by a rival banner!', 'bad');
+    WORLD.lastAlert = { id: z.id, name: z.name || r.name, kind: 'banner', at: Date.now() };
+  } else if (z.state === 'unowned' && r.owner === 'rival') {
+    r.owner = 'wild';
+    r.worldOwnerId = null;
+    r.gov = false;
+    S.mapDirty = true;
+  }
+}
+function applyServerZone(z) {
+  if (!z || !z.id) return;
+  const prev = WORLD.zones.get(z.id);
+  WORLD.zones.set(z.id, z);
+  applyHomeParcel(z);
+  materializeForeignZone(z);
+  if (z.underAttack && z.ownerId === myKingdomId()) alertZoneAttack(z);
+  void prev;
+}
+function seedZone(z) {
+  applyServerZone(z);
+  return z;
+}
+function worldZoneAt(x, y) {
+  let best = null, bd = 480;
+  const pt = { x, y };
+  for (const z of WORLD.zones.values()) {
+    const loc = localFromWorld(z.wx, z.wy);
+    const d = dist(loc, pt);
+    if (d < bd) { bd = d; best = z; }
+  }
+  return best;
+}
+function isWorldClaimable(z) {
+  if (!z) return false;
+  if (z.gov) return false;
+  if (z.state === 'contested' && z.claimerId && z.claimerId !== myKingdomId()) return false;
+  if (z.ownerId && z.ownerId === myKingdomId()) return false;
+  if (z.state === 'owned' && z.gov) return false;
+  return z.state === 'unowned' || (z.state === 'owned' && !z.gov);
+}
+function plantWorldBanner(zoneId) {
+  if (!S || S.over) return { ok: false, reason: 'No game' };
+  const z = WORLD.zones.get(zoneId);
+  if (!z) return { ok: false, reason: 'No zone' };
+  if (z.ownerId && z.ownerId === myKingdomId()) return { ok: false, reason: 'Already yours' };
+  if (z.gov) return { ok: false, reason: 'A Hall governs this land' };
+  if (z.state === 'contested' && z.claimerId && z.claimerId !== myKingdomId()) return { ok: false, reason: 'A banner already stands' };
+  const loc = localFromWorld(z.wx, z.wy);
+  const range = TUNE.bannerPlantRange || 220;
+  if (dist(S.monarch, loc) > range) {
+    toast('Move closer to plant a banner', 'bad');
+    return { ok: false, reason: 'Too far' };
+  }
+  const from = z.state === 'owned' ? 'held' : 'wild';
+  const hp = Math.round((TUNE.bannerHp || 200) * allyHpMul());
+  z.state = 'contested';
+  z.claimerId = myKingdomId();
+  z.claimFrom = from;
+  z._banner = { x: loc.x, y: loc.y, hp, max: hp, contested: true, type: 'core', zoneId: z.id, r: TUNE.bannerR || 18 };
+  zoneAct('plant', z.id, { from, bannerHp: hp });
+  toast('Banner planted in ' + (z.name || 'this land') + ' — contested! Hold it through the night to capture.', 'good');
+  return { ok: true, id: z.id };
+}
+function completeWorldClaim(z) {
+  z = typeof z === 'string' ? WORLD.zones.get(z) : z;
+  if (!z || z.state !== 'contested') return false;
+  const me = myKingdomId();
+  z.state = 'owned';
+  z.ownerId = me;
+  z.ownerName = CLOUD.kingdom && CLOUD.kingdom.name;
+  z.ownerColor = kingdomColor(me);
+  z.claimerId = null;
+  z.gov = false;
+  z.govHp = null;
+  z.govMax = null;
+  z._banner = null;
+  zoneAct('claim', z.id, { buildings: (z.buildings || []) });
+  toast((z.name || 'The land') + ' is yours. Build a Hall to lock the claim.', 'good');
+  applyServerZone(z);
+  return true;
+}
+function takeZoneFromHall(hall) {
+  if (!hall) return;
+  const zid = hall.zoneId || (hall.region >= 1 && myKingdomId() ? zoneKey(myKingdomId(), hall.region) : null);
+  const leftover = S.buildings.filter(b => b !== hall && b.hp > 0 && ((zid && b.zoneId === zid) || (hall.region >= 0 && b.region === hall.region)));
+  for (const b of leftover) { b.owner = 'player'; b.foreign = false; }
+  if (hall.region >= 1 && S.regions[hall.region]) {
+    const r = S.regions[hall.region];
+    r.owner = 'player';
+    r.gov = false;
+    r.worldOwnerId = myKingdomId();
+    r.worldOwnerName = CLOUD.kingdom && CLOUD.kingdom.name;
+    r.worldOwnerColor = kingdomColor(myKingdomId());
+    toast(r.name + ' is yours — leftover buildings transfer. Build a Hall to lock the claim.', 'good');
+  } else {
+    const z = zid && WORLD.zones.get(zid);
+    if (z) {
+      z.ownerId = myKingdomId();
+      z.ownerName = CLOUD.kingdom && CLOUD.kingdom.name;
+      z.ownerColor = kingdomColor(myKingdomId());
+      z.gov = false;
+      z.govHp = null;
+      z.govMax = null;
+      z.underAttack = false;
+    }
+    toast(((z && z.name) || 'The land') + ' is yours — leftover buildings transfer. Build a Hall to lock the claim.', 'good');
+  }
+  if (zid) zoneAct('take', zid, { buildings: leftover.map(packBldWorld) });
+  S.mapDirty = true;
+  markNavDirty();
+}
+
 
 function upsertRealm(r) {
   if (!r || !r.id || (CLOUD.kingdom && r.id === CLOUD.kingdom.id)) return;
@@ -1043,6 +1329,9 @@ function disconnectWorld() {
   WORLD.ws = null;
   WORLD.room = '';
   WORLD.realms.clear();
+  if (WORLD.zones) WORLD.zones.clear();
+  if (WORLD.attackAlerts) WORLD.attackAlerts.clear();
+  WORLD.lastAlert = null;
   if (ws) {
     try { ws.onclose = null; ws.onerror = null; ws.onmessage = null; ws.close(); } catch (e) {}
   }
@@ -1088,7 +1377,10 @@ function handleWorldMsg(msg) {
   if (msg.t === 'hello') {
     WORLD.room = msg.room || '';
     WORLD.realms.clear();
+    if (WORLD.zones) WORLD.zones.clear();
     for (const r of (msg.realms || [])) upsertRealm(r);
+    for (const z of (msg.zones || [])) applyServerZone(z);
+    publishHomeZones();
     updateCloudNote();
     if (PUI.worldOpen) renderWorldSheet();
     return;
@@ -1104,6 +1396,8 @@ function handleWorldMsg(msg) {
     const r = WORLD.realms.get(msg.id) || { id: msg.id };
     upsertRealm(Object.assign(r, msg, { online: true }));
   }
+  if (msg.t === 'zup' && msg.zone) applyServerZone(msg.zone);
+  if (msg.t === 'zlist' && msg.zones) for (const z of msg.zones) applyServerZone(z);
 }
 function sendWorldState(force) {
   const ws = WORLD.ws;
@@ -1127,6 +1421,7 @@ function sendWorldState(force) {
       over: !!S.over,
     }));
   } catch (e) {}
+  if (force || now - (WORLD.lastPub || 0) > 2000) publishHomeZones();
 }
 function syncWorld() {
   if (isEndlessCloud() && !CLOUD.forceOffline) {
@@ -1558,7 +1853,7 @@ function spawnVagrant() {
   const c = S.camp; if (!c) return;
   S.folk.push(mkFolk('vagrant', c.x + (Math.random() - .5) * 60, c.y + 10 + (Math.random() - .5) * 40));
 }
-function isUnownedRegion(r) { return !!r && r.owner !== 'player' && r.owner !== 'contested'; }
+function isUnownedRegion(r) { return !!r && r.owner !== 'player' && r.owner !== 'contested' && r.owner !== 'rival'; }
 function findCampSpot(r) {
   if (!isUnownedRegion(r)) return null;
   const toward = (S.regions && S.regions[0]) || { x: CX, y: CY };
@@ -1623,6 +1918,7 @@ function heldCores() { return S.regions.filter(r => r.core && (r.owner === 'play
 function claimScaleOf(r) { return Math.pow(1 + (TUNE.claimFailScale || 0.25), (r && r.claimFails) || 0); }
 function isClaimable(r) {
   if (!r || r.owner === 'player' || r.owner === 'contested') return false;
+  if (zoneHasHall(r)) return false;
   if (r.core && r.core.hp > 0) return false;
   if (S.guardians.some(g => g.region === r.id && g.hp > 0)) return false;
   return true;
@@ -2185,11 +2481,21 @@ function finishClear(obj) {
 function placeBlocked(type, x, y, extra) {
   if ((type === 'wall' || type === 'gate') && hasCurse('nowalls')) return 'No Walls Pact forbids walls and gates';
   if (optionLocked(type)) return 'God of Choice locked this option';
-  if (x < 20 || y < 20 || x > W - 20 || y > H - 20) return 'Out of bounds';
-  const rid = regionIdAt(x, y), r = S.regions[rid];
-  if (!r || r.owner !== 'player') return 'You can only build in captured land';
-  if (r.core && dist(r.core, { x, y }) < 40) return 'Too close to the banner';
-  const rr = BLD[type].r;
+  const oz = owningZoneAt(x, y);
+  if (x < 20 || y < 20 || x > W - 20 || y > H - 20) {
+    if (!oz || oz.home) return 'Out of bounds';
+  }
+  const rid = oz && oz.rid != null ? oz.rid : regionIdAt(x, y);
+  const r = (oz && oz.r) || (S.regions && S.regions[rid]);
+  if (!oz && (!r || r.owner !== 'player')) return 'You can only build in captured land';
+  if (!oz && r && r.owner !== 'player') return 'You can only build in captured land';
+  if (type === 'hall') {
+    if ((oz && oz.home && oz.rid === 0) || rid === 0) return 'The castle already governs your seat';
+    const zid = oz && oz.z && oz.z.id;
+    if (S.buildings.some(b => b.type === 'hall' && b.hp > 0 && ((zid && b.zoneId === zid) || (rid != null && b.region === rid)))) return 'This land already has a Hall';
+  }
+  if (r && r.core && dist(r.core, { x, y }) < 40) return 'Too close to the banner';
+  const rr = (BLD[type] && BLD[type].r) || 16;
   const ignore = extra && extra.ignore;
   const wallish = t => t === 'wall' || t === 'gate';
   const tooClose = (other, otherType) => {
@@ -2231,9 +2537,11 @@ function swapWallForGate(wall) {
   return wall;
 }
 function placeBld(type, x, y) {
-  const rid = regionIdAt(x, y);
+  const oz = owningZoneAt(x, y);
+  const rid = oz && oz.rid != null ? oz.rid : regionIdAt(x, y);
   S.coins -= buildCost(type);
   const b = mkBld(type, x, y, rid, 0);
+  if (oz && oz.z) b.zoneId = oz.z.id;
   if (isStandType(type)) { b.tool = type; b.paid = 0; b.tools = 0; S.stands.push(b); }
   S.buildings.push(b);
   if (S.rubble && S.rubble.length) S.rubble = S.rubble.filter(ru => dist(ru, b) > (ru.r || 16) + (b.r || 16));
@@ -2659,6 +2967,10 @@ function inspectables() {
   for (const b of S.buildings) out.push(b);
   for (const r of S.regions) if (r.core && !S.buildings.includes(r.core)) out.push(r.core);
   for (const r of S.regions) if (isClaimable(r)) out.push(bannerSiteOf(r));
+  for (const z of WORLD.zones.values()) if (isWorldClaimable(z) && z.homeId !== myKingdomId()) {
+    const loc = localFromWorld(z.wx, z.wy);
+    out.push({ id: 'wsite-' + z.id, type: 'bannerSite', x: loc.x, y: loc.y, r: 22, zoneId: z.id, owner: 'none', built: 1, level: 1 });
+  }
   for (const m of S.mines || []) out.push(m);
   return out;
 }
@@ -2682,6 +2994,7 @@ function inspectNameOf(b) {
   if (b.type === 'tower' && b.path === 'ballista') return 'Ballista tower';
   if (b.tool) return NICE[b.tool] || 'Tool stand';
   const n = NICE[b.type] || b.type;
+  if (b.owner === 'rival') return (b.worldOwnerName ? (b.worldOwnerName + ' ') : 'Rival ') + n;
   return b.owner === 'pale' ? ('Pale ' + n) : n;
 }
 function inspectReason(need) {
@@ -3487,6 +3800,13 @@ function onBuilt(b) {
   S.stats.built++;
   floatTxt(b.x, b.y - 40, NICE[b.type] + ' built', '#d6ffb0');
   if (b.type === 'house') toast(`House built — +${houseSlotsOf(b)} worker slot${houseSlotsOf(b) === 1 ? '' : 's'}`, 'good');
+  else if (b.type === 'hall') {
+    toast('Hall built — this land is locked against banner claims', 'good');
+    if (S.regions[b.region]) S.regions[b.region].gov = true;
+    const zid = b.zoneId || (b.region >= 1 && myKingdomId() ? zoneKey(myKingdomId(), b.region) : null);
+    if (zid) zoneAct('gov', zid, { govHp: b.hp, govMax: b.max, buildings: (S.buildings.filter(x => x.region === b.region && x.type !== 'hall' && x.owner === 'player').map(packBldWorld)) });
+    publishHomeZones();
+  }
   else if (b.type === 'farm') toast('Farm built — a Farmer can work it for coins', 'good');
   else if (b.tool) toast(NICE[b.tool] + ' built — drop coins to stock tools', 'good');
   else if (b.type === 'gate') toast('Gate built — your people can pass, the Pale Host cannot', 'good');
@@ -3681,6 +4001,9 @@ function startNight() {
     const cn = Math.max(1, Math.round(n * (TUNE.claimWaveMul || 2) * scale));
     for (let i = 0; i < cn; i++) claimQ.push({ kind: Math.random() < 0.5 ? 'shambler' : 'skeleton', claim: r.id, scale });
   }
+  for (const z of WORLD.zones.values()) {
+    z._queued = !!(z.state === 'contested' && z.claimerId === myKingdomId() && z._banner);
+  }
   // An empty wave never starts night — stay in (or return to) day.
   if (!q.length && !claimQ.length) { S.phase = 'day'; S.phaseT = DAY; S.spawnQ = []; S.claimQ = []; return; }
   S.phase = 'night'; S.phaseT = 0;
@@ -3712,7 +4035,7 @@ function waveEntryPoint(side) {
   const fr = (S.focus != null && S.regions[S.focus]) || S.regions[0];
   const use = side === 'both' ? (rand() < 0.5 ? 'left' : 'right') : (side || 'left');
   const sign = use === 'left' ? -1 : 1;
-  const pool = S.regions.filter(r => r.owner !== 'player' && r.owner !== 'contested' && (use === 'left' ? r.x < fr.x : r.x >= fr.x))
+  const pool = S.regions.filter(r => r.owner !== 'player' && r.owner !== 'contested' && r.owner !== 'rival' && (use === 'left' ? r.x < fr.x : r.x >= fr.x))
     .sort((a, b) => dist(a, fr) - dist(b, fr));
   if (pool.length && dist(pool[0], fr) < 900) return { x: pool[0].x, y: pool[0].y, side: use };
   const off = 360 + rand() * 80;
@@ -3720,7 +4043,7 @@ function waveEntryPoint(side) {
 }
 function pickFocus() {
   const o = owned().filter(r => r.core); if (!o.length) { S.focus = null; return; }
-  const foes = S.regions.filter(r => r.owner !== 'player' && r.owner !== 'contested');
+  const foes = S.regions.filter(r => r.owner !== 'player' && r.owner !== 'contested' && r.owner !== 'rival');
   const exposure = r => foes.length ? Math.min(...foes.map(f => dist(f, r))) : 0;
   const score = r => r.core.hp + 0.25 * exposure(r) + (r.id === 0 ? 60 : 0);
   o.sort((a, b) => score(a) - score(b)); S.focus = o[0].id;
@@ -3779,12 +4102,19 @@ function spawnUndead(kind, at, returned, opts) {
 // ---------- enemies ----------
 function enemiesList() {
   const l = S.undead.concat(S.guardians);
-  for (const b of S.buildings) if (b.owner === 'pale' && (b.type === 'tower' || b.type === 'fort')) l.push(b);
+  for (const b of S.buildings) {
+    if (b.owner === 'pale' && (b.type === 'tower' || b.type === 'fort')) l.push(b);
+    if (b.owner === 'rival' && b.hp > 0 && (b.type === 'hall' || b.type === 'tower' || b.type === 'fort')) l.push(b);
+  }
   return l;
 }
 function damage(e, dmg) {
   e.hp -= dmg;
   e.flash = 0.12;
+  if (e.type === 'hall' && e.owner === 'rival' && e.zoneId && !e._atkPing) {
+    e._atkPing = true;
+    zoneAct('attack', e.zoneId);
+  }
   if (e.hp > 0) return;
   if (e.type === 'undead') {
     const coin = e.coin != null ? e.coin : UNDEAD[e.kind].coin;
@@ -3825,6 +4155,12 @@ function damage(e, dmg) {
     }
     else if (e.tool && e.owner === 'player') toast('A tool stand was destroyed', 'bad');
     else if (e.type === 'gate' && e.owner === 'player') toast('A Gate was destroyed', 'bad');
+    else if (e.type === 'hall' && e.owner === 'rival') takeZoneFromHall(e);
+    else if (e.type === 'hall' && e.owner === 'player') {
+      if (S.regions[e.region]) S.regions[e.region].gov = false;
+      toast('Your Hall was destroyed — rivals can plant a banner here', 'bad');
+      publishHomeZones();
+    }
   } else if (e.type === 'archer') {
     S.archers.splice(S.archers.indexOf(e), 1); S.stats.folkLost++;
   } else if (e.type === 'folk') {
@@ -3844,6 +4180,7 @@ function requestPlantBanner(zoneId) {
   const r = S.regions[zoneId];
   if (!r) return { ok: false, reason: 'No zone' };
   if (r.owner === 'player') return { ok: false, reason: 'Already yours' };
+  if (zoneHasHall(r)) return { ok: false, reason: 'A Hall governs this land' };
   if (r.owner === 'contested' && r.core && r.core.hp > 0) return { ok: false, reason: 'A banner already stands' };
   if (S.guardians.some(g => g.region === r.id && g.hp > 0)) {
     toast('A guardian still holds this land', 'bad');
@@ -3855,8 +4192,9 @@ function requestPlantBanner(zoneId) {
     toast('Move closer to plant a banner', 'bad');
     return { ok: false, reason: 'Too far' };
   }
-  const from = r.owner === 'pale' ? 'pale' : 'wild';
+  const from = r.owner === 'pale' ? 'pale' : (r.owner === 'rival' ? 'held' : 'wild');
   r.claimFrom = from;
+  r.prevOwner = r.owner === 'rival' ? 'rival' : from;
   r.claimQueued = false;
   r.owner = 'contested';
   const hp = Math.round((TUNE.bannerHp || 200) * allyHpMul());
@@ -3871,6 +4209,7 @@ function requestPlantBanner(zoneId) {
     ? `Banner planted in ${r.name} — contested! Hold it through the night. Attempt ${attempt} (+${pct}% host).`
     : `Banner planted in ${r.name} — contested! Hold it through the night to capture.`, 'good');
   refreshCamps();
+  if (myKingdomId() && r.id) { const pos = worldFromLocal(r.x, r.y); zoneAct('plant', zoneKey(r.worldHomeId || myKingdomId(), r.id), { from, bannerHp: hp, wx: pos.x, wy: pos.y, name: r.name, region: r.id }); }
   if (PUI.inspectId && String(PUI.inspectId).slice(0, 5) === 'site-' && +String(PUI.inspectId).slice(5) === r.id) {
     openInspect(r.core);
   }
@@ -3880,15 +4219,17 @@ function failClaim(r) {
   if (!r || r.owner !== 'contested') return;
   r.claimFails = (r.claimFails || 0) + 1;
   const from = r.claimFrom || 'wild';
-  r.owner = from;
+  r.owner = from === 'held' ? (r.prevOwner || 'rival') : from;
   r.core = null;
   r.claimFrom = null;
   r.claimQueued = false;
   S.mapDirty = true; markNavDirty();
   S.fx.push({ k: 'burst', x: r.x, y: r.y, t: 1.05, t0: 1.05, bad: 1 });
   const pct = Math.round((claimScaleOf(r) - 1) * 100);
-  toast(`${r.name} banner fell! The zone stays ${from === 'pale' ? 'Pale' : 'wild'}. Next attempt: +${pct}% host and +${pct}% strength.`, 'bad');
+  const stay = from === 'held' ? 'with its owner' : (from === 'pale' ? 'Pale' : 'wild');
+  toast(`${r.name} banner fell! The zone stays ${stay}. Next attempt: +${pct}% host and +${pct}% strength.`, 'bad');
   refreshCamps();
+  if (myKingdomId() && r.id) { const pos = worldFromLocal(r.x, r.y); zoneAct('fail', zoneKey(r.worldHomeId || myKingdomId(), r.id), { wx: pos.x, wy: pos.y, name: r.name, region: r.id }); }
   closeInspect();
 }
 function completeClaim(r) {
@@ -3917,9 +4258,17 @@ function completeClaim(r) {
     if (r.bonus === 'fort') { S.buildings.push(mkBld('fort', r.x + 60, r.y + 10, r.id, 1)); extra = ' +free Encampment Fort'; }
     if (r.bonus === 'keep') { banner.keep = true; banner.level = 1; banner.max = banner.hp = TUNE.coreKeep; banner.r = TUNE.keepR[0]; extra = ' +free Ruin Keep'; }
     r.bonus = null;
-    toast(`Banner held! ${r.name} is yours.${extra}`, 'good');
+    toast(`Banner held! ${r.name} is yours.${extra} Build a Hall to lock the claim.`, 'good');
   }
   refreshCamps();
+  if (myKingdomId() && r.id) {
+    r.worldOwnerId = myKingdomId();
+    r.worldOwnerName = CLOUD.kingdom && CLOUD.kingdom.name;
+    r.worldOwnerColor = kingdomColor(myKingdomId());
+    const pos = worldFromLocal(r.x, r.y);
+    zoneAct('claim', zoneKey(myKingdomId(), r.id), { buildings: S.buildings.filter(b => b.region === r.id && b.owner === 'player').map(packBldWorld), wx: pos.x, wy: pos.y, name: r.name, region: r.id });
+    publishHomeZones();
+  }
   return true;
 }
 function resolveClaims() {
@@ -3928,6 +4277,16 @@ function resolveClaims() {
     // Planting mid-night does not count — the banner must face the counterattack night first.
     if (r.claimQueued && r.core && r.core.hp > 0) completeClaim(r);
     else if (r.claimQueued) failClaim(r);
+  }
+  for (const z of WORLD.zones.values()) {
+    if (z.state !== 'contested' || z.claimerId !== myKingdomId() || !z._banner) continue;
+    if (z._queued && z._banner.hp > 0) completeWorldClaim(z);
+    else if (z._queued) {
+      z.state = z.claimFrom === 'held' && z.ownerId ? 'owned' : 'unowned';
+      z.claimerId = null;
+      z._banner = null;
+      zoneAct('fail', z.id);
+    }
   }
 }
 
@@ -5306,6 +5665,35 @@ function paintHouse(kind) {
   if (!pale && !dmg) spr.smoke = { dx: 14, dy: -40 };
   return spr;
 }
+function paintHall(kind) {
+  const pale = kind === 'pale', dmg = kind === 'dmg', rival = kind === 'rival';
+  const wall = pale ? '#9aa394' : rival ? '#d4b48a' : dmg ? '#e4d3b4' : '#efe4c8';
+  const wallD = pale ? '#6d756c' : rival ? '#a88858' : dmg ? '#b7a484' : '#c9a36a';
+  const roof = pale ? '#6a7368' : rival ? '#c45a3a' : '#3e74c8';
+  const roofL = pale ? '#8d9788' : rival ? '#e89070' : '#7eb0ee';
+  const roofD = pale ? '#455046' : rival ? '#8a3c28' : '#2a4e86';
+  const spr = bake(56, 62, g => {
+    poly(g, [[10, 30], [38, 30], [38, 54], [10, 54]], wall);
+    poly(g, [[38, 30], [50, 22], [50, 46], [38, 54]], wallD);
+    g.fillStyle = pale ? '#2a3028' : '#6e4328';
+    g.fillRect(16, 38, 8, 16);
+    g.fillStyle = pale ? '#9dff7a' : dmg ? '#3a3028' : '#ffd27a';
+    g.fillRect(28, 36, 6, 7);
+    poly(g, [[6, 32], [24, 8], [42, 32]], roof);
+    poly(g, [[24, 8], [52, 20], [42, 32]], roofD);
+    poly(g, [[6, 32], [24, 8], [16, 24]], roofL);
+    g.fillStyle = pale ? '#5c645c' : '#8d8478';
+    g.fillRect(44, 8, 4.4, 16);
+    g.fillStyle = rival ? '#c45a3a' : pale ? '#3e463e' : '#3e74c8';
+    g.beginPath(); g.moveTo(46, 10); g.lineTo(56, 14); g.lineTo(46, 18); g.closePath(); g.fill();
+    if (dmg) {
+      g.strokeStyle = '#5c4030'; g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(18, 34); g.lineTo(22, 48); g.stroke();
+    }
+  });
+  spr.gy = 54;
+  return spr;
+}
 function paintFarm(kind) {
   const pale = kind === 'pale', ripe = kind === 'ripe', grow = kind === 'growing' || ripe;
   const spr = bake(64, 40, g => {
@@ -6334,6 +6722,7 @@ function buildArt() {
   Art.tool = { bow: paintToolIcon('bow'), hammer: paintToolIcon('hammer'), scythe: paintToolIcon('scythe') };
   Art.stand = { bow: paintStand('bow'), hammer: paintStand('hammer'), scythe: paintStand('scythe') };
   Art.house = paintHouse('live'); Art.houseDmg = paintHouse('dmg'); Art.houseP = paintHouse('pale');
+  Art.hall = paintHall('live'); Art.hallDmg = paintHall('dmg'); Art.hallP = paintHall('pale'); Art.hallR = paintHall('rival');
   Art.farm = { tilled: paintFarm('tilled'), growing: paintFarm('growing'), ripe: paintFarm('ripe'), pale: paintFarm('pale') };
   Art.scaffold = [0, 1, 2].map(paintScaffold);
   Art.orderMark = paintOrderMark();
@@ -6885,6 +7274,7 @@ function buildingSpr(b) {
   if (b.tool) return Art.stand[b.tool] || Art.stand.bow;
   if (b.type === 'fort') return pale ? Art.fortP : Art.fort;
   if (b.type === 'house') return pale ? Art.houseP : (b.hp < b.max ? Art.houseDmg : Art.house);
+  if (b.type === 'hall') return pale ? Art.hallP : (b.owner === 'rival' ? Art.hallR : (b.hp < b.max ? Art.hallDmg : Art.hall));
   if (b.type === 'farm') return pale ? Art.farm.pale : Art.farm.tilled;
   if (b.type === 'tower') return pale ? Art.towerP : Art.tower;
   return pale ? Art.towerP : Art.tower;
@@ -7665,6 +8055,7 @@ function render() {
   for (const b of S.buildings) if (vis(b.x, b.y) && !b.tool) pushP(b.type === 'farm' && b.built >= 1 ? b.y - 30 : b.y, 'bld', b);
   for (const st of S.stands) if (vis(st.x, st.y)) pushP(st.y, 'stand', st);
   for (const r of S.regions) if (r.core && vis(r.x, r.y)) pushP(r.core.y, 'core', r.core);
+  for (const z of WORLD.zones.values()) if (z._banner && vis(z._banner.x, z._banner.y)) pushP(z._banner.y, 'core', z._banner);
   for (const r of S.regions) if (isClaimable(r) && vis(r.x, r.y)) pushP(r.y + 0.2, 'site', bannerSiteOf(r));
   for (const g of S.guardians) if (vis(g.x, g.y)) pushP(g.y, 'guard', g);
   for (const a of S.archers) if (vis(a.x, a.y)) pushP(a.y, 'arch', a);
@@ -7703,12 +8094,22 @@ function render() {
   }
 
   for (const r of S.regions) if (vis(r.x, r.y)) {
-    const st = r.owner === 'player' ? 'YOURS' : r.owner === 'contested' ? 'CONTESTED' : r.owner === 'pale' ? 'PALE HOST' : (r.bonus === 'fort' ? 'WILD · fort' : r.bonus === 'keep' ? 'WILD · keep' : 'WILD');
+    let st = r.owner === 'player' ? 'YOURS' : r.owner === 'contested' ? 'CONTESTED' : r.owner === 'pale' ? 'PALE HOST' : r.owner === 'rival' ? ((r.worldOwnerName || 'RIVAL') + (r.gov ? '' : ' · no hall')) : (r.bonus === 'fort' ? 'WILD · fort' : r.bonus === 'keep' ? 'WILD · keep' : 'WILD');
+    if (r.owner === 'player' && r.worldOwnerName) st = r.worldOwnerName;
     const lift = r.core && r.core.keep ? 108 : 86;
-    placeTag(r.name, r.x, r.y - lift, 18, '#fff8ee', null, 'name');
-    const stCol = r.owner === 'player' ? '#d6e6ff' : r.owner === 'contested' ? '#ffe6b0' : r.owner === 'pale' ? '#d7f0cc' : '#ffe6b0';
-    const stRim = r.owner === 'player' ? '#7eb0ee' : r.owner === 'contested' ? '#e8a83a' : r.owner === 'pale' ? '#9ddea8' : '#e6c27a';
+    const nameCol = r.worldOwnerColor || (r.owner === 'player' ? '#fff8ee' : '#fff8ee');
+    placeTag(r.name, r.x, r.y - lift, 18, nameCol, r.worldOwnerColor || null, 'name');
+    const stCol = r.owner === 'player' ? (r.worldOwnerColor || '#d6e6ff') : r.owner === 'contested' ? '#ffe6b0' : r.owner === 'pale' ? '#d7f0cc' : r.owner === 'rival' ? (r.worldOwnerColor || '#e07a5f') : '#ffe6b0';
+    const stRim = r.owner === 'player' ? (r.worldOwnerColor || '#7eb0ee') : r.owner === 'contested' ? '#e8a83a' : r.owner === 'pale' ? '#9ddea8' : r.owner === 'rival' ? (r.worldOwnerColor || '#e07a5f') : '#e6c27a';
     placeTag(st, r.x, r.y - lift + 24, 12, stCol, stRim, 'status');
+  }
+  for (const z of WORLD.zones.values()) {
+    if (z.homeId === myKingdomId()) continue;
+    const loc = localFromWorld(z.wx, z.wy);
+    if (!vis(loc.x, loc.y)) continue;
+    const own = z.state === 'owned' ? ((z.ownerId === myKingdomId() ? 'YOURS' : (z.ownerName || 'RIVAL')) + (z.gov ? '' : ' · no hall')) : z.state === 'contested' ? 'CONTESTED' : 'WILD';
+    placeTag(z.name || 'Land', loc.x, loc.y - 86, 18, z.ownerColor || '#fff8ee', z.ownerColor || null, 'name');
+    placeTag(own, loc.x, loc.y - 62, 12, z.ownerColor || '#ffe6b0', z.ownerColor || '#e6c27a', 'status');
   }
   for (const g of S.guardians) {
     if (!vis(g.x, g.y) || !edgeOf(g.x, g.y).on) continue;
@@ -7900,7 +8301,7 @@ window.__bc = {
   get lookX() { return lookX; }, set lookX(v) { lookX = v; },
   get lookY() { return lookY; }, set lookY(v) { lookY = v; },
   get lookFree() { return lookFree; }, set lookFree(v) { lookFree = !!v; },
-  setBuild, setZoomAt, planWallLine, commitWallLine, placeBlocked, swapWallForGate, gateOpen, solidAt, tryMove,
+  setBuild, setZoomAt, planWallLine, commitWallLine, placeBlocked, swapWallForGate, gateOpen, solidAt, tryMove, tryPlace, placeBld, damage, onBuilt,
   decorAt, markClear, tryMarkDecor, finishClear, tryMarkDemo, finishDemo, unmarkDemo,
   get wallDrag() { return wallDrag; },
   setWallDrag(x0, y0, x1, y1) { wallDrag = { x0, y0, x1, y1, plan: planWallLine(x0, y0, x1, y1) }; return wallDrag.plan; },
@@ -7962,12 +8363,21 @@ window.__bc = {
       connected: !!(WORLD.ws && WORLD.ws.readyState === 1),
       blocked: worldInputBlocked(),
       ever: !!WORLD.ever,
+      lastAlert: WORLD.lastAlert,
+      zones: [...WORLD.zones.values()].map(z => ({
+        id: z.id, homeId: z.homeId, region: z.region, wx: z.wx, wy: z.wy, name: z.name,
+        ownerId: z.ownerId, ownerName: z.ownerName, ownerColor: z.ownerColor, state: z.state,
+        gov: !!z.gov, govHp: z.govHp, govMax: z.govMax, underAttack: !!z.underAttack,
+        buildings: z.buildings || [],
+      })),
       realms: [...WORLD.realms.values()].map(r => ({
         id: r.id, name: r.name, spawn: r.spawn, nights: r.nights, online: !!r.online,
         mx: r.mx, my: r.my,
       })),
     };
   },
+  kingdomColor, worldFromLocal, localFromWorld, zoneKey, publishHomeZones, applyServerZone, seedZone,
+  plantWorldBanner, completeWorldClaim, isWorldClaimable, takeZoneFromHall, owningZoneAt, zoneHasHall, hallOf,
   setFakeGeo(lat, lon) { CLOUD.fakeGeo = (lat == null ? null : { lat, lon }); },
   forceGeoDenied(v) { CLOUD.forceGeoDenied = !!v; },
   get apiBase() { return apiBase(); },

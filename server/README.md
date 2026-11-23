@@ -43,3 +43,7 @@ npx wrangler d1 execute boundless-crown --remote --command "SELECT name FROM kin
 ```
 
 There is no separate test D1 in this step; prefer deleting `Qa*` afterwards over leaving leftovers in the live world.
+
+## Shared zones (v27)
+Endless kingdoms fight over the same land parcels. The D1 `zones` table (see `schema-v27.sql`) stores ownership, banner contests, governing-building HP, and a leftover-building snapshot. Region 0 (the kingdom castle) is never stored. Region rooms include nearby zones in the `hello` payload and relay `zpub` / `zact` / `zup` over the existing WebSocket. Wild land has no Hall; a Hall is paid and builder-built after a claim. Until a Hall stands, a rival can retake the owned zone with a banner. After it stands, the Hall must be destroyed to take the zone and leftover buildings.
+

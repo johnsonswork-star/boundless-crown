@@ -3,6 +3,7 @@
 
 import { RegionRoom } from './room.js';
 export { RegionRoom };
+import { nearbyZones } from './zones.js';
 
 const ITERS = 4000; // PBKDF2-SHA-256; kept modest so we stay under the 10 ms free CPU cap
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -405,6 +406,7 @@ async function handleWs(req, env) {
   const k = await authByToken(env.DB, token);
   if (!k) return json(req, { ok: false, error: 'unauthorized' }, 401);
   const nearby = await nearbyKingdoms(env.DB, k.spawn_x, k.spawn_y, VIEW_RADIUS);
+  const zones = await nearbyZones(env.DB, k.spawn_x, k.spawn_y, VIEW_RADIUS);
   const room = roomForKingdom(k);
   const id = env.ROOMS.idFromName('room:' + room);
   const stub = env.ROOMS.get(id);
@@ -417,6 +419,7 @@ async function handleWs(req, env) {
     day: k.last_day || 1,
     room,
     nearby,
+    zones,
   }));
   return stub.fetch(new Request(req, { headers }));
 }

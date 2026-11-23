@@ -2,6 +2,8 @@
    Uses the WebSocket Hibernation API so idle rooms do not burn duration. */
 'use strict';
 
+import { publishZones, actZone, nearbyZones } from './zones.js';
+
 export class RegionRoom {
   constructor(ctx, env) {
     this.ctx = ctx;
@@ -51,6 +53,7 @@ export class RegionRoom {
       room: join.room || '',
       you: { id: att.id, name: att.name, spawn: att.spawn },
       realms,
+      zones: join.zones || [],
     }));
     this.broadcast({ t: 'join', realm: this.publicRealm(att, true) }, att.id);
     return new Response(null, { status: 101, webSocket: pair[0] });
@@ -101,10 +104,15 @@ export class RegionRoom {
     }
   }
 
-  webSocketMessage(ws, data) {
+  async webSocketMessage(ws, data) {
     let msg;
     try { msg = JSON.parse(typeof data === 'string' ? data : new TextDecoder().decode(data)); } catch (e) { return; }
-    if (!msg || msg.t !== 'st') return;
+    if (!msg || !msg.t) return;
+    if (msg.t === 'zpub' || msg.t === 'zact') {
+      await this.handleZone(ws, msg);
+      return;
+    }
+    if (msg.t !== 'st') return;
     const a = Object.assign({}, ws.deserializeAttachment() || {});
     if (!a.id) return;
     if (typeof msg.nights === 'number') a.nights = Math.max(0, Math.min(9999, msg.nights | 0));
@@ -139,5 +147,26 @@ export class RegionRoom {
 
   webSocketError(ws) {
     this.webSocketClose(ws, 1011);
+  }
+
+  async handleZone(ws, msg) {
+    const a = ws.deserializeAttachment() || {};
+    if (!a.id || !this.env || !this.env.DB) return;
+    const king = { id: a.id, name: a.name };
+    let res;
+    try {
+      if (msg.t === 'zpub') res = { ok: true, zones: await publishZones(this.env.DB, king, msg.zones || []) };
+      else res = await actZone(this.env.DB, king, msg);
+    } catch (e) {
+      res = { ok: false, error: 'server_error' };
+    }
+    if (res && res.zone) this.broadcast({ t: 'zup', zone: res.zone });
+    if (res && res.zones) {
+      try { ws.send(JSON.stringify({ t: 'zlist', zones: res.zones })); } catch (e) {}
+      for (const z of res.zones) this.broadcast({ t: 'zup', zone: z });
+    }
+    if (res && res.ok === false) {
+      try { ws.send(JSON.stringify({ t: 'zerr', error: res.error, id: msg.id || null, act: msg.act || null })); } catch (e) {}
+    }
   }
 }
