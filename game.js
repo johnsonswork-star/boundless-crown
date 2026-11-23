@@ -2260,18 +2260,19 @@ function onTap(sx, sy) {
   if (S.build) return tryPlace(S.build, w.x, w.y);
   const bld = buildingAt(w.x, w.y, Math.max(44, 64 / scale));
   const hit = workerAt(w.x, w.y);
+  const decor = decorAt(w.x, w.y, Math.max(28, 48 / scale));
   // A selected worker stays in "tap where to send" mode — don't steal the dest tap for inspect.
+  // A tree or rock under the finger wins over a nearby building, so a mark tap is not eaten by inspect.
   if (!S.sel && bld) {
     const bD = dist(bld, w) - (bld.r || 16);
     const hD = hit ? dist(hit, w) - (hit.r || 9) : 1e9;
-    if (!hit || bD <= hD + 6) {
+    const decD = decor ? dist(decor, w) - (decor.r || 16) : 1e9;
+    if ((!hit || bD <= hD + 6) && !(decor && decD <= bD + 8)) {
       openInspect(bld);
       return;
     }
   }
-  if (PUI.inspectId) { closeInspect(); return; }
-  // Prefer a tree/rock under the finger unless a worker is already selected (then a worker tap switches/deselects).
-  const decor = decorAt(w.x, w.y, Math.max(28, 48 / scale));
+  if (PUI.inspectId && !(decor && dist(decor, S.monarch) <= (TUNE.clearMarkRange || 170))) { closeInspect(); return; }
   if (hit) {
     const hitD = dist(hit, w) - (hit.r || 9);
     const decD = decor ? dist(decor, w) - (decor.r || 16) : 1e9;
