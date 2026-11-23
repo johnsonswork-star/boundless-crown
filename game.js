@@ -509,6 +509,8 @@ function updateCloudNote() {
       if (v) v.textContent = CLOUD.kingdom.name || '';
     }
   }
+  const worldBtn = $('btnWorld');
+  if (worldBtn) worldBtn.hidden = !(CLOUD.token && S && S.mode === 'endless' && !CLOUD.playingOffline);
   if (CLOUD.playingOffline && S && S.mode === 'endless') {
     el.hidden = false;
     el.className = 'warn';
@@ -811,10 +813,16 @@ async function openAccount() {
     updateCloudNote();
   }
 }
-async function requestSignUp(name, password) {
+async function requestSignUp(name, password, opts) {
+  opts = opts || {};
   CLOUD.playingOffline = false;
   acctBusy(true);
-  const r = await api('/v1/signup', { method: 'POST', body: { name, password }, noAuth: true });
+  const body = { name, password };
+  if (opts.cell && opts.cell.lat != null && opts.cell.lon != null) {
+    // Already snapped. Never attach raw coordinates.
+    body.cell = { lat: opts.cell.lat, lon: opts.cell.lon };
+  }
+  const r = await api('/v1/signup', { method: 'POST', body, noAuth: true });
   acctBusy(false);
   if (!r.ok) { acctMsg(humanApiError(r.error), 'bad'); return r; }
   acceptSession(r);
@@ -847,6 +855,7 @@ async function requestSignIn(name, password) {
 }
 function requestPlayOffline() {
   CLOUD.playingOffline = true;
+  disconnectWorld();
   // Keep a stored token unused while playing offline from this screen, but do not sign out other devices.
   startEndless();
   toast('Playing on this phone only. Progress stays here.', '');
@@ -910,6 +919,327 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pagehide', () => { requestSaveKingdom(); });
 
+// ---------- Shared world (v25): city-cell spawn, live realms, walk anywhere ----------
+const CELL_DEG = 0.2;
+const CELL_WORLD = 8000;
+function snapCell(lat, lon) {
+  const la = Number(lat), lo = Number(lon);
+  if (!Number.isFinite(la) || !Number.isFinite(lo)) return null;
+  if (la < -90 || la > 90 || lo < -180 || lo > 180) return null;
+  const iLat = Math.round(la / CELL_DEG);
+  const iLon = Math.round(lo / CELL_DEG);
+  return {
+    iLat,
+    iLon,
+    lat: Math.round(iLat * CELL_DEG * 10) / 10,
+    lon: Math.round(iLon * CELL_DEG * 10) / 10,
+  };
+}
+function cellCenter(cell) {
+  return { x: cell.iLon * CELL_WORLD, y: cell.iLat * CELL_WORLD };
+}
+function cellWorldBounds(cell) {
+  if (!cell) return null;
+  const c = cell.iLat != null ? cell : snapCell(cell.lat, cell.lon);
+  if (!c) return null;
+  const mid = cellCenter(c);
+  return { x0: mid.x - CELL_WORLD / 2, x1: mid.x + CELL_WORLD / 2, y0: mid.y - CELL_WORLD / 2, y1: mid.y + CELL_WORLD / 2, cx: mid.x, cy: mid.y };
+}
+function spawnInCell(spawn, cell) {
+  const b = cellWorldBounds(cell);
+  if (!b || !spawn) return false;
+  return spawn.x >= b.x0 && spawn.x < b.x1 && spawn.y >= b.y0 && spawn.y < b.y1;
+}
+
+async function requestCityCell() {
+  if (CLOUD.forceGeoDenied) return null;
+  if (CLOUD.fakeGeo && CLOUD.fakeGeo.lat != null) {
+    return snapCell(CLOUD.fakeGeo.lat, CLOUD.fakeGeo.lon);
+  }
+  if (!navigator.geolocation) return null;
+  try {
+    const pos = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: false,
+        timeout: 8000,
+        maximumAge: 10 * 60 * 1000,
+      });
+    });
+    // Snap immediately and drop the raw reading. Never keep exact coords.
+    return snapCell(pos.coords.latitude, pos.coords.longitude);
+  } catch (e) {
+    return null;
+  }
+}
+
+async function requestCreateKingdom() {
+  acctMsg('This places your kingdom near others from your city. We only use a rough city-sized area — never your exact spot or address.', '');
+  const cell = await requestCityCell();
+  if (!cell) acctMsg('No city location — you will start at a random place in the world. You can still walk anywhere.', '');
+  return requestSignUp($('acctName').value, $('acctPass').value, { cell });
+}
+
+const WORLD = {
+  ws: null,
+  room: '',
+  realms: new Map(),
+  wanted: false,
+  lastSt: 0,
+  lastSig: '',
+  backoff: 800,
+  timer: 0,
+};
+
+function myWorldSpawn() {
+  return (S && S.worldSpawn) || (CLOUD.kingdom && CLOUD.kingdom.spawn) || { x: 0, y: 0 };
+}
+function realmLocal(r) {
+  const me = myWorldSpawn();
+  const sp = r && r.spawn ? r.spawn : { x: 0, y: 0 };
+  return { x: CX + (sp.x - me.x), y: CY + (sp.y - me.y) };
+}
+function monarchLocal(r) {
+  const keep = realmLocal(r);
+  if (r.mx == null || r.my == null) return keep;
+  const me = myWorldSpawn();
+  return { x: CX + (r.spawn.x + (r.mx - CX) - me.x), y: CY + (r.spawn.y + (r.my - CY) - me.y) };
+}
+function canWalkWorld() { return isEndlessCloud(); }
+
+function upsertRealm(r) {
+  if (!r || !r.id || (CLOUD.kingdom && r.id === CLOUD.kingdom.id)) return;
+  const prev = WORLD.realms.get(r.id) || {};
+  WORLD.realms.set(r.id, Object.assign({}, prev, r));
+  if (PUI.worldOpen) renderWorldSheet();
+}
+function worldUrl() {
+  const base = apiBase();
+  const u = new URL('/v1/ws', base);
+  u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
+  if (CLOUD.token) u.searchParams.set('access_token', CLOUD.token);
+  return u.toString();
+}
+function disconnectWorld() {
+  WORLD.wanted = false;
+  if (WORLD.timer) { clearTimeout(WORLD.timer); WORLD.timer = 0; }
+  const ws = WORLD.ws;
+  WORLD.ws = null;
+  WORLD.room = '';
+  WORLD.realms.clear();
+  if (ws) {
+    try { ws.onclose = null; ws.onerror = null; ws.onmessage = null; ws.close(); } catch (e) {}
+  }
+  if (PUI.worldOpen) closeWorld();
+  updateCloudNote();
+}
+function connectWorld() {
+  if (!isEndlessCloud() || CLOUD.forceOffline) { disconnectWorld(); return; }
+  WORLD.wanted = true;
+  if (WORLD.ws && (WORLD.ws.readyState === 0 || WORLD.ws.readyState === 1)) return;
+  let ws;
+  try { ws = new WebSocket(worldUrl()); }
+  catch (e) { scheduleWorldReconnect(); return; }
+  WORLD.ws = ws;
+  ws.onopen = () => { WORLD.backoff = 800; sendWorldState(true); };
+  ws.onmessage = ev => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (e) { return; }
+    handleWorldMsg(msg);
+  };
+  ws.onclose = () => {
+    if (WORLD.ws === ws) WORLD.ws = null;
+    if (WORLD.wanted) scheduleWorldReconnect();
+  };
+  ws.onerror = () => { /* onclose follows */ };
+}
+function scheduleWorldReconnect() {
+  if (!WORLD.wanted || WORLD.timer) return;
+  const wait = WORLD.backoff;
+  WORLD.backoff = Math.min(8000, WORLD.backoff * 1.6);
+  WORLD.timer = setTimeout(() => { WORLD.timer = 0; if (WORLD.wanted) connectWorld(); }, wait);
+}
+function handleWorldMsg(msg) {
+  if (!msg || !msg.t) return;
+  if (msg.t === 'pong') return;
+  if (msg.t === 'hello') {
+    WORLD.room = msg.room || '';
+    WORLD.realms.clear();
+    for (const r of (msg.realms || [])) upsertRealm(r);
+    updateCloudNote();
+    if (PUI.worldOpen) renderWorldSheet();
+    return;
+  }
+  if (msg.t === 'join' && msg.realm) { upsertRealm(msg.realm); return; }
+  if (msg.t === 'leave' && msg.id) {
+    const r = WORLD.realms.get(msg.id);
+    if (r) { r.online = false; WORLD.realms.set(msg.id, r); }
+    if (PUI.worldOpen) renderWorldSheet();
+    return;
+  }
+  if (msg.t === 'upd' && msg.id) {
+    const r = WORLD.realms.get(msg.id) || { id: msg.id };
+    upsertRealm(Object.assign(r, msg, { online: true }));
+  }
+}
+function sendWorldState(force) {
+  const ws = WORLD.ws;
+  if (!ws || ws.readyState !== 1 || !S || S.mode !== 'endless') return;
+  const now = performance.now();
+  if (!force && now - WORLD.lastSt < 250) return;
+  const sig = [S.nights, S.day, S.phase, Math.round(S.monarch.x), Math.round(S.monarch.y), S.over ? 1 : 0].join(',');
+  if (!force && sig === WORLD.lastSig && now - WORLD.lastSt < 1000) return;
+  WORLD.lastSt = now;
+  WORLD.lastSig = sig;
+  try {
+    ws.send(JSON.stringify({
+      t: 'st',
+      nights: S.nights,
+      day: S.day,
+      phase: S.phase,
+      mx: S.monarch.x,
+      my: S.monarch.y,
+      hp: S.monarch.hp,
+      max: S.monarch.max,
+      over: !!S.over,
+    }));
+  } catch (e) {}
+}
+function syncWorld() {
+  if (isEndlessCloud() && !CLOUD.forceOffline) {
+    if (!WORLD.ws || WORLD.ws.readyState > 1) connectWorld();
+    sendWorldState(false);
+  } else if (WORLD.ws || WORLD.wanted) {
+    disconnectWorld();
+  }
+}
+
+function openWorld() {
+  if (!isEndlessCloud()) return;
+  PUI.worldOpen = true;
+  const el = $('world');
+  if (el) el.hidden = false;
+  renderWorldSheet();
+}
+function closeWorld() {
+  PUI.worldOpen = false;
+  const el = $('world');
+  if (el) el.hidden = true;
+  if (PUI.worldLook) {
+    PUI.worldLook = false;
+    lookFree = false;
+    zoom = TUNE.zoomStart;
+    applyScale();
+  }
+}
+function lookAtRealm(id) {
+  const r = WORLD.realms.get(id);
+  if (!r || !S) return;
+  const p = realmLocal(r);
+  PUI.worldLook = true;
+  lookFree = true;
+  lookX = p.x; lookY = p.y;
+  const me = { x: S.monarch.x, y: S.monarch.y };
+  const dist = Math.hypot(p.x - me.x, p.y - me.y);
+  const need = Math.max(vw, vh) / Math.max(220, dist * 1.3);
+  zoom = Math.max(0.08, Math.min(TUNE.zoomMin, need / (baseScale || 1)));
+  applyScale();
+  closeWorld();
+  PUI.worldLook = true;
+  lookFree = true;
+  toast((r.name || 'A kingdom') + (r.online ? ' — online' : ' — away'), '');
+}
+function renderWorldSheet() {
+  const list = $('worldList');
+  const empty = $('worldEmpty');
+  const canvas = $('worldMap');
+  if (!list || !canvas) return;
+  const realms = [...WORLD.realms.values()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  list.innerHTML = '';
+  if (empty) empty.hidden = realms.length > 0;
+  for (const r of realms) {
+    const li = document.createElement('li');
+    const nights = r.nights != null ? r.nights : 0;
+    const st = r.online ? 'Online · Night ' + nights : 'Away · Night ' + nights;
+    li.innerHTML = '<div class="meta"><span class="nm"></span><span class="st ' + (r.online ? 'on' : 'off') + '"></span></div>';
+    li.querySelector('.nm').textContent = r.name || 'Kingdom';
+    li.querySelector('.st').textContent = st;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Look';
+    btn.addEventListener('click', () => lookAtRealm(r.id));
+    li.appendChild(btn);
+    list.appendChild(li);
+  }
+  const ctxw = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctxw.fillStyle = '#1c1612';
+  ctxw.fillRect(0, 0, w, h);
+  const me = myWorldSpawn();
+  const pts = [{ x: me.x, y: me.y, self: true, name: (CLOUD.kingdom && CLOUD.kingdom.name) || 'You', online: true }];
+  for (const r of realms) if (r.spawn) pts.push({ x: r.spawn.x, y: r.spawn.y, name: r.name, online: !!r.online, id: r.id });
+  let minX = me.x, maxX = me.x, minY = me.y, maxY = me.y;
+  for (const p of pts) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }
+  const pad = 2000;
+  minX -= pad; maxX += pad; minY -= pad; maxY += pad;
+  const sx = (w - 24) / Math.max(2000, maxX - minX);
+  const sy = (h - 24) / Math.max(2000, maxY - minY);
+  const sc = Math.min(sx, sy);
+  const ox = (w - (maxX - minX) * sc) / 2;
+  const oy = (h - (maxY - minY) * sc) / 2;
+  const map = (p) => ({ x: ox + (p.x - minX) * sc, y: h - (oy + (p.y - minY) * sc) });
+  for (const p of pts) {
+    const s = map(p);
+    ctxw.beginPath();
+    ctxw.arc(s.x, s.y, p.self ? 8 : 6, 0, Math.PI * 2);
+    ctxw.fillStyle = p.self ? '#f0c14a' : (p.online ? '#d6ffb0' : '#8c7352');
+    ctxw.fill();
+    ctxw.lineWidth = 2;
+    ctxw.strokeStyle = '#2a1c10';
+    ctxw.stroke();
+    ctxw.font = '700 11px "Segoe UI", system-ui, sans-serif';
+    ctxw.fillStyle = '#fff6e4';
+    ctxw.textAlign = 'center';
+    ctxw.fillText(p.name || '', s.x, s.y - 12);
+  }
+}
+function drawRemoteRealms() {
+  if (!S || !isEndlessCloud() || !WORLD.realms.size) return;
+  for (const r of WORLD.realms.values()) {
+    const p = realmLocal(r);
+    if (!vis(p.x, p.y) && !vis(p.x, p.y - 80)) continue;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.fillStyle = 'rgba(28,20,14,.45)';
+    ctx.beginPath(); ctx.ellipse(0, 8, 28, 12, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = r.online ? '#5a3a22' : '#3a2c22';
+    ctx.beginPath();
+    ctx.moveTo(-22, 6); ctx.lineTo(-18, -16); ctx.lineTo(0, -28); ctx.lineTo(18, -16); ctx.lineTo(22, 6);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = r.online ? '#f0c14a' : '#8c7352';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.fillStyle = '#f0c14a';
+    ctx.beginPath();
+    ctx.moveTo(-8, -26); ctx.lineTo(-8, -38); ctx.lineTo(0, -33); ctx.lineTo(8, -38); ctx.lineTo(8, -26);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    if (r.online && r.mx != null) {
+      const m = monarchLocal(r);
+      if (vis(m.x, m.y)) {
+        ctx.fillStyle = '#d6ffb0';
+        ctx.beginPath(); ctx.arc(m.x, m.y, 7, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#2a1c10'; ctx.lineWidth = 1.5; ctx.stroke();
+      }
+    }
+    const tag = (r.name || 'Kingdom') + (r.online ? '  ·  online' : '');
+    queueWorldTag(tag, p.x, p.y - 48, 15, r.online ? '#d6ffb0' : '#f3e6cf', r.online ? '#3a7a3a' : '#5a4a38', 'realm');
+  }
+}
+
+
 function showOverlay(id) {
   closeInspect();
   for (const k of ['title', 'loadout', 'over', 'account']) {
@@ -924,6 +1254,7 @@ function showOverlay(id) {
   }
 }
 function showTitle() {
+  disconnectWorld();
   S = null;
   showOverlay('title');
   $('hint').textContent = '';
@@ -1052,12 +1383,12 @@ let dpr = 1, vw = 0, vh = 0, baseScale = 1, zoom = TUNE.zoomStart, scale = 1;
 let lookX = null, lookY = null, lookFree = false, pinch = null;
 // Per-player UI only (not simulation state). A later multiplayer Endless
 // mode can give each client their own inspect sheet without freezing the world.
-const PUI = { inspectId: null, inspectSig: '' };
+const PUI = { inspectId: null, inspectSig: '', worldOpen: false, worldLook: false };
 let nextBid = 1;
 function allocBid() { return 'b' + (nextBid++); }
 const pts = new Map();
 function applyScale() {
-  const zMin = TUNE.zoomMin, zMax = TUNE.zoomMax;
+  const zMin = (PUI.worldLook ? 0.08 : TUNE.zoomMin), zMax = TUNE.zoomMax;
   zoom = zoom < zMin ? zMin : zoom > zMax ? zMax : zoom;
   scale = baseScale * zoom;
 }
@@ -1421,12 +1752,14 @@ $('btnEndless').addEventListener('click', () => openAccount());
 $('btnChallenge').addEventListener('click', () => openLoadout());
 $('btnAcctBack').addEventListener('click', () => showTitle());
 $('btnSignIn').addEventListener('click', () => requestSignIn($('acctName').value, $('acctPass').value));
-$('btnSignUp').addEventListener('click', () => requestSignUp($('acctName').value, $('acctPass').value));
+$('btnSignUp').addEventListener('click', () => requestCreateKingdom());
 $('btnPlayOffline').addEventListener('click', () => requestPlayOffline());
 $('acctPass').addEventListener('keydown', e => { if (e.key === 'Enter') requestSignIn($('acctName').value, $('acctPass').value); });
 $('btnLoadoutBack').addEventListener('click', () => showTitle());
 $('btnStartChallenge').addEventListener('click', () => startChallenge());
 $('btnInspectClose').addEventListener('click', () => closeInspect());
+if ($('btnWorld')) $('btnWorld').addEventListener('click', () => openWorld());
+if ($('btnWorldClose')) $('btnWorldClose').addEventListener('click', () => closeWorld());
 $('inspectActions').addEventListener('click', e => {
   const btn = e.target.closest('button');
   if (!btn || btn.disabled || !PUI.inspectId) return;
@@ -1475,7 +1808,7 @@ function followCam(dt) {
   if (!S || pinch) return;
   if (ptr && ptr.pan) return;
   // In build mode, or while a worker is selected to send, a pan / scripted look stays put so you can tap off-screen land.
-  if (lookFree && (S.build || (S && S.sel))) return;
+  if (lookFree && (S.build || (S && S.sel) || PUI.worldLook)) return;
   lookFree = false;
   const m = S.monarch;
   if (lookX == null) { lookX = m.x; lookY = m.y; return; }
@@ -1502,6 +1835,8 @@ function toggleRally() {
 function camera() {
   const tx = lookX != null ? lookX : S.monarch.x, ty = lookY != null ? lookY : S.monarch.y;
   const hw = vw / 2 / scale, hh = vh / 2 / scale;
+  // Signed-in Endless: the monarch may walk the whole shared world, so the camera may leave the home 2400 map.
+  if (canWalkWorld() || PUI.worldLook) return { x: tx, y: ty };
   return { x: clamp(tx, Math.min(hw, CX), Math.max(W - hw, CX)), y: clamp(ty, Math.min(hh, CY), Math.max(H - hh, CY)) };
 }
 function s2w(sx, sy) { const c = camera(); return { x: c.x + (sx - vw / 2) / scale, y: c.y + (sy - vh / 2) / scale }; }
@@ -3685,7 +4020,9 @@ function tickOverlapMon(dt) {
   for (const u of S.undead) acc(u, false, u.kind || 'undead');
 }
 function tryMove(e, nx, ny, friend) {
-  nx = clamp(nx, 10, W - 10); ny = clamp(ny, 10, H - 10);
+  if (!(S && e === S.monarch && canWalkWorld())) {
+    nx = clamp(nx, 10, W - 10); ny = clamp(ny, 10, H - 10);
+  }
   if (!solidAt(nx, ny, e.r, friend) || solidAt(e.x, e.y, e.r, friend)) { e.x = nx; e.y = ny; return true; }
   if (!solidAt(nx, e.y, e.r, friend)) { e.x = nx; return true; }
   if (!solidAt(e.x, ny, e.r, friend)) { e.y = ny; return true; }
@@ -7380,6 +7717,7 @@ function render() {
   }
   for (const f of S.fx) if (f.k !== 'arrow') drawFxItem(f);
 
+  drawRemoteRealms();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
@@ -7507,6 +7845,7 @@ function frame(now) {
   syncInspect();
   render(); drawHud();
   maybeAutosave();
+  syncWorld();
   requestAnimationFrame(frame);
 }
 
@@ -7570,7 +7909,21 @@ window.__bc = {
   timeBonus, realmBonus, scoreBase, finalScore, enemyMods, buildCost, toolStockCost,
   showTitle, openLoadout, startEndless, startChallenge, openAccount,
   requestSignUp, requestSignIn, requestPlayOffline, requestSaveKingdom, requestSignOut,
+  requestCreateKingdom, snapCell, cellWorldBounds, spawnInCell,
   serializeKingdom, applyKingdomState,
+  openWorld, closeWorld, lookAtRealm, connectWorld, disconnectWorld,
+  get world() {
+    return {
+      room: WORLD.room,
+      connected: !!(WORLD.ws && WORLD.ws.readyState === 1),
+      realms: [...WORLD.realms.values()].map(r => ({
+        id: r.id, name: r.name, spawn: r.spawn, nights: r.nights, online: !!r.online,
+        mx: r.mx, my: r.my,
+      })),
+    };
+  },
+  setFakeGeo(lat, lon) { CLOUD.fakeGeo = (lat == null ? null : { lat, lon }); },
+  forceGeoDenied(v) { CLOUD.forceGeoDenied = !!v; },
   get apiBase() { return apiBase(); },
   set apiBase(v) { window.__bc._apiBase = v; CLOUD.api = v; },
   forceOffline(v) { CLOUD.forceOffline = !!v; if (v) CLOUD.offline = true; updateCloudNote(); },
@@ -7580,6 +7933,7 @@ window.__bc = {
       name: CLOUD.kingdom && CLOUD.kingdom.name,
       id: CLOUD.kingdom && CLOUD.kingdom.id,
       spawn: CLOUD.kingdom && CLOUD.kingdom.spawn,
+      cell: CLOUD.kingdom && CLOUD.kingdom.cell,
       world: CLOUD.world,
       offline: !!CLOUD.offline,
       playingOffline: !!CLOUD.playingOffline,

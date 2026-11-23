@@ -1,11 +1,16 @@
-# Pages-hosted copy of the same Worker (same D1). No secrets.
-# Used as the public API URL because *.pages.dev is a single-label hostname.
+# Pages Function config. The Durable Object class lives on the boundless-crown Worker.
+# Pages cannot create a DO namespace; it only binds to the Worker script.
 name = "boundless-crown-api"
-compatibility_date = "2026-11-22"
 pages_build_output_dir = "public"
+compatibility_date = "2026-11-22"
 account_id = "ff3a2b410bd5081d42ddbdc5d78611ad"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "boundless-crown"
 database_id = "cb395cef-9795-40df-94cd-845e9f10d238"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RegionRoom"
+script_name = "boundless-crown"

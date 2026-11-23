@@ -16,6 +16,14 @@ Endless talks to a free Cloudflare Worker + D1 backend. The client only knows th
 - Sign-in issues a session token (kept in `sessionStorage` on that phone). Your Endless map, coins, buildings, and villagers are saved to the server so a fresh phone can sign in and restore them.
 - Every kingdom is placed into one permanent shared world at a spawn coordinate (groundwork for seeing other kingdoms later). Each Endless run is still its own saved 2400×2400 map in this step.
 - If the server cannot be reached, Endless is still playable locally, with a clear “playing on this phone only” message.
+
+### Shared world and city spawn (Endless, v25)
+Signed-in Endless connects over a WebSocket to a **region-sharded Durable Object room** (SQLite-backed, hibernation) so nearby kingdoms appear and update instantly — no polling. Challenge never talks to this API. Offline play stays on this phone only and does not join the world.
+
+- **Starting seat:** creating a kingdom asks the browser once for your location, with a clear on-screen explanation first. The client snaps the reading to a coarse **city-sized cell** (0.2°) and sends only that rounded cell. The Worker re-snaps, places a random offset inside the cell, and nudges the keep so it does not land on an existing kingdom. Exact coordinates are never stored or sent. Other players see the kingdom name and world seat, never a place name or address.
+- If location is denied or unavailable, the kingdom starts at a **random** world seat (no cell is stored).
+- That seat is only the starting spot. In signed-in Endless the monarch can **walk the whole shared world**; movement is not tied to real-world location. A Realms sheet lists nearby kingdoms (online/away) and can look toward them.
+
 - Worker source lives in `/server` (no tokens, no `.dev.vars`). Stay on the Cloudflare free plan — no Durable Objects.
 
 - **Challenge** is a scored run. Survive **20 nights** (`TUNE.challengeNights`) to win — Blood Moons on nights 10 and 20 fall inside the run. Before you start, a loadout screen lets you toggle any number of **Curses** (harder, higher score) and **Blessings** (helpful, lower score). The live combined multiplier (the product of every toggle) is shown as you pick. Locked cards stay greyed until you reach nights 5, 10, 15, or 20 in any Challenge run; that progress is saved in `localStorage` under `bc-challenge-unlocks`. `window.__bc.unlockAll()` / `resetUnlocks()` are there for QA.

@@ -18,7 +18,12 @@ CREATE TABLE IF NOT EXISTS kingdoms (
   spawn_x REAL NOT NULL,
   spawn_y REAL NOT NULL,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  last_nights INTEGER NOT NULL DEFAULT 0,
+  last_day INTEGER NOT NULL DEFAULT 1,
+  last_seen INTEGER NOT NULL DEFAULT 0,
+  cell_lat REAL,
+  cell_lon REAL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

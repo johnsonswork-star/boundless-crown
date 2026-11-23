@@ -25,3 +25,9 @@ npx wrangler pages deploy public --project-name=boundless-crown-api --commit-dir
 ```
 
 `public/_worker.js` is a symlink to `src/worker.js` (Pages advanced-mode entry).
+
+## v25 realtime and city spawn
+
+- `RegionRoom` is a SQLite-backed Durable Object (Workers Free allows this backend). WebSockets use the hibernation API.
+- Signup may include `{ cell: { lat, lon } }` already snapped to 0.2°. The Worker re-snaps and stores only that cell plus the world spawn. It ignores any other location fields. If `cell` is omitted, spawn is random and no cell is stored.
+- Realm lists and WebSocket presence never include the cell or any place name.

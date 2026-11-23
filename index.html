@@ -8,7 +8,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>Boundless Crown — prototype</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23241910'/%3E%3Cpath fill='%23f0c14a' d='M3 12.2 4.2 6.2 8 9.1 11.8 6.2 13 12.2z'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=24">
+<link rel="stylesheet" href="style.css?v=25">
 </head>
 <body>
 <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
@@ -210,13 +210,14 @@
   <button id="btnBuild" data-act="build" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-hammer"/></svg><b>Build</b><i>menu</i></button>
   <button id="btnDrop" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-drop"/></svg><b>Drop coin</b><i>hold = more</i></button>
   <button id="btnRally" data-act="rally" type="button"><svg class="ico big" viewBox="0 0 24 24"><use href="#i-flag"/></svg><b>Rally</b><i>off</i></button>
+  <button id="btnWorld" type="button" hidden><svg class="ico big" viewBox="0 0 24 24"><use href="#i-castle"/></svg><b>Realms</b><i>world</i></button>
 </div>
 <div id="title">
   <div class="card title-card">
     <h1>Boundless Crown</h1>
     <p class="tag">A throne in a wild land. Choose how you will rule.</p>
     <button id="btnEndless" type="button">Endless</button>
-    <p class="mode-desc">Survive as long as you can. Sign in to keep your kingdom on any phone, or play here only.</p>
+    <p class="mode-desc">Survive as long as you can. Sign in to keep your kingdom and see nearby realms live, or play here only.</p>
     <button id="btnChallenge" type="button">Challenge</button>
     <p class="mode-desc">Survive 20 nights. Pick curses and blessings, then chase a high score.</p>
   </div>
@@ -254,6 +255,7 @@
     <button id="btnAcctBack" type="button">Back</button>
     <h1>Your kingdom</h1>
     <p class="tag">A name and password keep this Endless realm on any phone. Names are unique. Challenge stays on this device.</p>
+    <p id="acctGeo" class="acct-geo">Creating a kingdom asks once for your city so we can seat you near neighbors. We only keep a rough city-sized area — never your exact spot, address, or place name. If you decline, you start at a random place in the world, and you can walk anywhere afterward.</p>
     <label for="acctName">Kingdom name</label>
     <input id="acctName" type="text" name="username" maxlength="24" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="next" inputmode="text">
     <label for="acctPass">Password</label>
@@ -276,6 +278,17 @@
     </div>
   </div>
 </div>
+
+<div id="world" hidden>
+  <div class="world-sheet" role="dialog" aria-labelledby="worldTitle">
+    <button id="btnWorldClose" type="button" aria-label="Close">×</button>
+    <h2 id="worldTitle">Nearby realms</h2>
+    <p id="worldSub" class="world-sub">The shared world. Updates are instant while you are signed in.</p>
+    <canvas id="worldMap" width="360" height="240"></canvas>
+    <ul id="worldList"></ul>
+    <p id="worldEmpty" class="world-empty" hidden>No other kingdoms in range yet.</p>
+  </div>
+</div>
 <div id="inspect" hidden>
   <div class="inspect-sheet" role="dialog" aria-labelledby="inspectName">
     <button id="btnInspectClose" type="button" aria-label="Close">×</button>
@@ -291,6 +304,6 @@
     <div id="inspectActions"></div>
   </div>
 </div>
-<script src="game.js?v=24"></script>
+<script src="game.js?v=25"></script>
 </body>
 </html>
