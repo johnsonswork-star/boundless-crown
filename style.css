@@ -182,12 +182,11 @@ canvas{position:fixed;inset:0;display:block;touch-action:none}
 .account-card input:focus{outline:3px solid #f0c14a;outline-offset:1px}
 #btnAcctBack{font-family:inherit;font-size:16px;font-weight:900;padding:12px 14px;border-radius:14px;border:3px solid #2a1c10;
   background:#f0c14a;color:#2a1c10;width:auto;min-height:52px;min-width:72px}
-#btnSignIn,#btnSignUp,#btnPlayOffline{font-family:inherit;font-size:20px;font-weight:900;padding:14px 18px;border-radius:16px;border:3px solid #2a1c10;
+#btnSignIn,#btnSignUp,#btnNeedRetry,#btnNeedChallenge{font-family:inherit;font-size:20px;font-weight:900;padding:14px 18px;border-radius:16px;border:3px solid #2a1c10;
   background:#f0c14a;color:#2a1c10;width:100%;min-height:56px;margin-top:10px}
 #btnSignUp{background:linear-gradient(#ffe08a,#e2b14a)}
-#btnPlayOffline.ghost,#btnPlayOffline{background:#2a2118;border-color:#8c7352;color:#fff6e4;font-size:18px}
-#btnSignIn:active,#btnSignUp:active,#btnPlayOffline:active,#btnAcctBack:active{transform:scale(.98)}
-#btnSignIn[disabled],#btnSignUp[disabled],#btnPlayOffline[disabled]{opacity:.55}
+#btnSignIn:active,#btnSignUp:active,#btnNeedRetry:active,#btnNeedChallenge:active,#btnAcctBack:active{transform:scale(.98)}
+#btnSignIn[disabled],#btnSignUp[disabled],#btnNeedRetry[disabled],#btnNeedChallenge[disabled]{opacity:.55}
 .acct-msg{margin:12px 0 4px;font-size:16px;font-weight:800;line-height:1.35;color:#ffe08a;text-align:center}
 .acct-msg.bad{color:#ffb4a8}
 .acct-msg.good{color:#d6ffb0}
@@ -220,3 +219,12 @@ canvas{position:fixed;inset:0;display:block;touch-action:none}
 .world-empty{margin:12px 0 0;font-size:16px;font-weight:800;text-align:center;color:#f3e6cf}
 
 .acct-geo{margin:0 0 14px;font-size:15px;line-height:1.35;color:#ffe9c4;font-weight:700;text-align:center}
+
+/* Online-only Endless (v26): unreachable screen + mid-game reconnect overlay */
+#needNet{position:fixed;inset:0;z-index:11;background:rgba(16,12,10,.88);display:flex;align-items:center;justify-content:center;padding:calc(env(safe-area-inset-top) + 12px) 14px calc(env(safe-area-inset-bottom) + 12px);overflow:auto}
+#needNet[hidden]{display:none}
+.neednet-card{text-align:center}
+#btnNeedChallenge.ghost{background:#2a2118;border-color:#8c7352;color:#fff6e4;font-size:18px}
+#reconnect{position:fixed;inset:0;z-index:14;background:rgba(16,12,10,.55);display:flex;align-items:flex-start;justify-content:center;padding:calc(env(safe-area-inset-top) + 14px) 12px 0;pointer-events:auto}
+#reconnect[hidden]{display:none}
+.reconnect-banner{text-align:center;font-weight:900;font-size:17px;line-height:1.35;color:#2a1c10;background:#ffe08a;border:3px solid #2a1c10;border-radius:14px;padding:12px 16px;box-shadow:0 8px 20px rgba(0,0,0,.4);max-width:22em}

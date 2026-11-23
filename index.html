@@ -8,7 +8,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>Boundless Crown — prototype</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23241910'/%3E%3Cpath fill='%23f0c14a' d='M3 12.2 4.2 6.2 8 9.1 11.8 6.2 13 12.2z'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=25">
+<link rel="stylesheet" href="style.css?v=26">
 </head>
 <body>
 <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
@@ -217,7 +217,7 @@
     <h1>Boundless Crown</h1>
     <p class="tag">A throne in a wild land. Choose how you will rule.</p>
     <button id="btnEndless" type="button">Endless</button>
-    <p class="mode-desc">Survive as long as you can. Sign in to keep your kingdom and see nearby realms live, or play here only.</p>
+    <p class="mode-desc">Survive as long as you can. Sign in to join the shared world and keep your kingdom on any phone. Endless needs internet.</p>
     <button id="btnChallenge" type="button">Challenge</button>
     <p class="mode-desc">Survive 20 nights. Pick curses and blessings, then chase a high score.</p>
   </div>
@@ -263,8 +263,18 @@
     <p id="acctMsg" class="acct-msg" hidden></p>
     <button id="btnSignIn" type="button">Sign in</button>
     <button id="btnSignUp" type="button">Create kingdom</button>
-    <button id="btnPlayOffline" type="button" class="ghost">Play on this phone only</button>
   </div>
+</div>
+<div id="needNet" hidden>
+  <div class="card title-card neednet-card">
+    <h1>Endless</h1>
+    <p class="tag">Endless needs internet. Challenge works offline.</p>
+    <button id="btnNeedRetry" type="button">Retry</button>
+    <button id="btnNeedChallenge" type="button" class="ghost">Challenge</button>
+  </div>
+</div>
+<div id="reconnect" hidden>
+  <div class="reconnect-banner">Reconnecting to the world…</div>
 </div>
 <div id="over" hidden>
   <div class="card over-card">
@@ -304,6 +314,6 @@
     <div id="inspectActions"></div>
   </div>
 </div>
-<script src="game.js?v=25"></script>
+<script src="game.js?v=26"></script>
 </body>
 </html>

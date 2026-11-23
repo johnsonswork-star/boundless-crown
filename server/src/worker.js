@@ -225,7 +225,7 @@ function roomForKingdom(k) {
       return regionKey(c.x, c.y);
     }
   }
-  return roomForKingdom(k);
+  return regionKey((k && k.spawn_x) || 0, (k && k.spawn_y) || 0);
 }
 
 function realmPublic(row, online) {

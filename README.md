@@ -7,7 +7,7 @@ Phone-first, single-page HTML5 canvas prototype (vanilla JS, no build step, no C
 ## Modes
 The title screen offers **Endless** and **Challenge**.
 
-- **Endless** is the original game: survive as long as you can. There is no score and no finish line. You can **create or sign in to a kingdom** (name + password) so the run continues from any phone, or **play on this phone only** if the world is unreachable. Challenge stays single-player and never talks to the server.
+- **Endless** is the original game: survive as long as you can. There is no score and no finish line. It is **signed-in and online only** — create or sign in to a kingdom (name + password) to join the shared world and keep the run on any phone. If the world is unreachable, Endless is not playable; the game says **Endless needs internet. Challenge works offline.** and offers Challenge and Retry. Mid-game disconnects show a reconnecting banner and block input until the world is back. Challenge stays single-player, never talks to the server, and works offline.
 
 ### Accounts and the shared world (Endless, v24)
 Endless talks to a free Cloudflare Worker + D1 backend. The client only knows the public URL `https://boundless-crown-api.pages.dev` (the same Worker is also at `https://boundless-crown.johnsonswork.workers.dev`). Passwords are hashed with PBKDF2-SHA-256 and a unique salt **in the Worker**; they are never stored in plaintext and no secrets live in this repo.
@@ -15,16 +15,18 @@ Endless talks to a free Cloudflare Worker + D1 backend. The client only knows th
 - Kingdom names are unique (compared case-insensitively, ignoring extra spaces). The server rejects a taken name.
 - Sign-in issues a session token (kept in `sessionStorage` on that phone). Your Endless map, coins, buildings, and villagers are saved to the server so a fresh phone can sign in and restore them.
 - Every kingdom is placed into one permanent shared world at a spawn coordinate (groundwork for seeing other kingdoms later). Each Endless run is still its own saved 2400×2400 map in this step.
-- If the server cannot be reached, Endless is still playable locally, with a clear “playing on this phone only” message.
+- Endless is not playable without the world. If the server cannot be reached, the game shows “Endless needs internet. Challenge works offline.” with Challenge and Retry. There is no guest, unsigned, or “play on this phone only” path.
 
-### Shared world and city spawn (Endless, v25)
-Signed-in Endless connects over a WebSocket to a **region-sharded Durable Object room** (SQLite-backed, hibernation) so nearby kingdoms appear and update instantly — no polling. Challenge never talks to this API. Offline play stays on this phone only and does not join the world.
+### Shared world and city spawn (Endless, v25–v26)
+Signed-in Endless connects over a WebSocket to a **region-sharded Durable Object room** (SQLite-backed, hibernation) so nearby kingdoms appear and update instantly — no polling. Challenge never talks to this API and is the only mode that works without internet.
 
 - **Starting seat:** creating a kingdom asks the browser once for your location, with a clear on-screen explanation first. The client snaps the reading to a coarse **city-sized cell** (0.2°) and sends only that rounded cell. The Worker re-snaps, places a random offset inside the cell, and nudges the keep so it does not land on an existing kingdom. Exact coordinates are never stored or sent. Other players see the kingdom name and world seat, never a place name or address.
 - If location is denied or unavailable, the kingdom starts at a **random** world seat (no cell is stored).
 - That seat is only the starting spot. In signed-in Endless the monarch can **walk the whole shared world**; movement is not tied to real-world location. A Realms sheet lists nearby kingdoms (online/away) and can look toward them.
 
-- Worker source lives in `/server` (no tokens, no `.dev.vars`). Stay on the Cloudflare free plan — no Durable Objects.
+- Worker source lives in `/server` (no tokens, no `.dev.vars`). Stay on the Cloudflare free plan. Live rooms use SQLite-backed Durable Objects, which the free plan allows; do not switch to the paid key-value Durable Object backend.
+
+QA and smoke tests should use kingdom names with the **`Qa` prefix** and a far test location (not a real city), then delete those rows from D1 afterwards so the shared world stays empty for real players.
 
 - **Challenge** is a scored run. Survive **20 nights** (`TUNE.challengeNights`) to win — Blood Moons on nights 10 and 20 fall inside the run. Before you start, a loadout screen lets you toggle any number of **Curses** (harder, higher score) and **Blessings** (helpful, lower score). The live combined multiplier (the product of every toggle) is shown as you pick. Locked cards stay greyed until you reach nights 5, 10, 15, or 20 in any Challenge run; that progress is saved in `localStorage` under `bc-challenge-unlocks`. `window.__bc.unlockAll()` / `resetUnlocks()` are there for QA.
 

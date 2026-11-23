@@ -2,7 +2,7 @@
 
 Cloudflare Workers + D1 backend for **Endless** (Versus) mode. Challenge stays single-player and never talks to this API.
 
-- Free Workers plan only (no Durable Objects, no paid features).
+- Free Workers plan. Live rooms use SQLite-backed Durable Objects (allowed on free). Do not upgrade the account from these files.
 - Passwords are PBKDF2-SHA-256 + unique salt, hashed in the Worker. They are never stored in plaintext and must never be committed.
 - No API tokens, OAuth credentials, or `.dev.vars` belong in git. The client is given only a public URL.
 
@@ -31,3 +31,15 @@ npx wrangler pages deploy public --project-name=boundless-crown-api --commit-dir
 - `RegionRoom` is a SQLite-backed Durable Object (Workers Free allows this backend). WebSockets use the hibernation API.
 - Signup may include `{ cell: { lat, lon } }` already snapped to 0.2°. The Worker re-snaps and stores only that cell plus the world spawn. It ignores any other location fields. If `cell` is omitted, spawn is random and no cell is stored.
 - Realm lists and WebSocket presence never include the cell or any place name.
+
+## QA cleanup (v26)
+
+Smoke and Playwright accounts must use the `Qa` prefix (and a far test cell, not a real city). After a run, delete them from production D1 so the shared world stays empty:
+
+```
+export WRANGLER_CACHE_DIR=/home/box/.cache/wrangler
+npx wrangler d1 execute boundless-crown --remote --command "SELECT name FROM kingdoms ORDER BY name;"
+# then delete matching test rows (sessions and saves for those ids too). Never delete a kingdom you can confirm is a real player.
+```
+
+There is no separate test D1 in this step; prefer deleting `Qa*` afterwards over leaving leftovers in the live world.

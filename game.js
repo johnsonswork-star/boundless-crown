@@ -392,7 +392,6 @@ const CLOUD = {
   kingdom: null,
   world: null,
   offline: false,
-  playingOffline: false,
   forceOffline: false,
   lastError: '',
   lastSaveOk: false,
@@ -401,7 +400,13 @@ const CLOUD = {
   lastSaveAt: 0,
 };
 function apiBase() { return (window.__bc && window.__bc._apiBase) || CLOUD.api || BC_API; }
-function isEndlessCloud() { return !!(CLOUD.token && S && S.mode === 'endless' && !CLOUD.playingOffline); }
+function isEndlessCloud() { return !!(CLOUD.token && S && S.mode === 'endless'); }
+function isWorldLive() {
+  return !!(isEndlessCloud() && !CLOUD.forceOffline && WORLD && WORLD.ws && WORLD.ws.readyState === 1);
+}
+function worldInputBlocked() {
+  return !!(S && S.mode === 'endless' && !isWorldLive());
+}
 function loadSession() {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
@@ -437,7 +442,6 @@ function acceptSession(r) {
   CLOUD.kingdom = r.kingdom || CLOUD.kingdom;
   CLOUD.world = r.world || CLOUD.world;
   CLOUD.offline = false;
-  CLOUD.playingOffline = false;
   CLOUD.lastError = '';
   persistSession();
   if (S && S.mode === 'endless' && CLOUD.kingdom && CLOUD.kingdom.spawn) S.worldSpawn = CLOUD.kingdom.spawn;
@@ -451,7 +455,7 @@ function acctMsg(text, cls) {
   el.className = 'acct-msg' + (cls ? ' ' + cls : '');
 }
 function acctBusy(on) {
-  for (const id of ['btnSignIn', 'btnSignUp', 'btnPlayOffline']) {
+  for (const id of ['btnSignIn', 'btnSignUp', 'btnNeedRetry', 'btnNeedChallenge']) {
     const b = $(id); if (b) b.disabled = !!on;
   }
 }
@@ -461,7 +465,7 @@ function humanApiError(err) {
     bad_credentials: 'Wrong name or password.',
     bad_name: "Use 3–24 letters, numbers, spaces, or hyphens.",
     bad_password: 'Password must be 6–72 characters.',
-    offline: 'The world is unreachable. You can still play on this phone.',
+    offline: 'Endless needs internet. Challenge works offline.',
     unauthorized: 'Please sign in again.',
     bad_response: 'The world sent a bad reply.',
   })[err] || (err ? String(err) : 'Something went wrong.');
@@ -502,7 +506,7 @@ function updateCloudNote() {
   if (!el) return;
   const chip = $('hKingdom');
   if (chip) {
-    const on = !!(CLOUD.kingdom && CLOUD.token && S && S.mode === 'endless' && !CLOUD.playingOffline);
+    const on = isEndlessCloud();
     chip.hidden = !on;
     if (on) {
       const v = chip.querySelector('.val');
@@ -510,22 +514,31 @@ function updateCloudNote() {
     }
   }
   const worldBtn = $('btnWorld');
-  if (worldBtn) worldBtn.hidden = !(CLOUD.token && S && S.mode === 'endless' && !CLOUD.playingOffline);
-  if (CLOUD.playingOffline && S && S.mode === 'endless') {
-    el.hidden = false;
-    el.className = 'warn';
-    el.textContent = 'Playing on this phone only. Progress stays here.';
-    return;
-  }
-  if (CLOUD.token && CLOUD.offline && S && S.mode === 'endless') {
-    el.hidden = false;
-    el.className = 'warn';
-    el.textContent = 'The world is unreachable. Playing offline — changes will not be saved until it is back.';
-    return;
-  }
+  if (worldBtn) worldBtn.hidden = !isEndlessCloud();
   el.hidden = true;
   el.textContent = '';
   el.className = '';
+  updateReconnectUi();
+}
+function reconnectBannerText() {
+  return WORLD && WORLD.ever ? 'Reconnecting to the world…' : 'Connecting to the world…';
+}
+function updateReconnectUi() {
+  const el = $('reconnect');
+  if (!el) return;
+  const blocked = worldInputBlocked();
+  el.hidden = !blocked;
+  const ban = el.querySelector('.reconnect-banner');
+  if (ban) ban.textContent = reconnectBannerText();
+  if (blocked) {
+    if (PUI && PUI.inspectId) closeInspect();
+    if (PUI && PUI.worldOpen) closeWorld();
+    if (S) S.dropHold = false;
+    ptr = null;
+    wallDrag = null;
+    pinch = null;
+    pts.clear();
+  }
 }
 function plainCopy(obj, skip) {
   const o = {};
@@ -797,25 +810,31 @@ function applyKingdomState(state) {
   updateCloudNote();
   return true;
 }
+function showNeedNet() {
+  disconnectWorld();
+  S = null;
+  showOverlay('needNet');
+  updateCloudNote();
+}
 async function openAccount() {
-  showOverlay('account');
   acctMsg('');
   acctBusy(false);
   if (CLOUD.forceOffline) {
     CLOUD.offline = true;
-    acctMsg(humanApiError('offline'), 'bad');
-    updateCloudNote();
+    CLOUD.lastError = 'offline';
+    showNeedNet();
     return;
   }
+  showOverlay('account');
   const h = await api('/v1/health', { noAuth: true, timeout: 6000 });
   if (!h.ok) {
-    acctMsg(humanApiError('offline'), 'bad');
-    updateCloudNote();
+    CLOUD.offline = true;
+    CLOUD.lastError = 'offline';
+    showNeedNet();
   }
 }
 async function requestSignUp(name, password, opts) {
   opts = opts || {};
-  CLOUD.playingOffline = false;
   acctBusy(true);
   const body = { name, password };
   if (opts.cell && opts.cell.lat != null && opts.cell.lon != null) {
@@ -824,7 +843,11 @@ async function requestSignUp(name, password, opts) {
   }
   const r = await api('/v1/signup', { method: 'POST', body, noAuth: true });
   acctBusy(false);
-  if (!r.ok) { acctMsg(humanApiError(r.error), 'bad'); return r; }
+  if (!r.ok) {
+    if (r.error === 'offline') showNeedNet();
+    else acctMsg(humanApiError(r.error), 'bad');
+    return r;
+  }
   acceptSession(r);
   if (r.save && r.save.state) applyKingdomState(r.save.state);
   else {
@@ -837,11 +860,14 @@ async function requestSignUp(name, password, opts) {
   return r;
 }
 async function requestSignIn(name, password) {
-  CLOUD.playingOffline = false;
   acctBusy(true);
   const r = await api('/v1/signin', { method: 'POST', body: { name, password }, noAuth: true });
   acctBusy(false);
-  if (!r.ok) { acctMsg(humanApiError(r.error), 'bad'); return r; }
+  if (!r.ok) {
+    if (r.error === 'offline') showNeedNet();
+    else acctMsg(humanApiError(r.error), 'bad');
+    return r;
+  }
   acceptSession(r);
   if (r.save && r.save.state) applyKingdomState(r.save.state);
   else {
@@ -853,27 +879,17 @@ async function requestSignIn(name, password) {
   updateCloudNote();
   return r;
 }
-function requestPlayOffline() {
-  CLOUD.playingOffline = true;
-  disconnectWorld();
-  // Keep a stored token unused while playing offline from this screen, but do not sign out other devices.
-  startEndless();
-  toast('Playing on this phone only. Progress stays here.', '');
-  updateCloudNote();
-  return true;
-}
 async function requestSignOut() {
   if (CLOUD.token && !CLOUD.forceOffline) {
     try { await api('/v1/signout', { method: 'POST' }); } catch (e) {}
   }
   clearSession();
-  CLOUD.playingOffline = false;
   updateCloudNote();
   showTitle();
 }
 let saveWaiters = [];
 async function requestSaveKingdom() {
-  if (!CLOUD.token || CLOUD.playingOffline || CLOUD.forceOffline) return { ok: false, error: CLOUD.forceOffline ? 'offline' : 'skipped' };
+  if (!CLOUD.token || CLOUD.forceOffline) return { ok: false, error: CLOUD.forceOffline ? 'offline' : 'skipped' };
   if (!S || S.mode !== 'endless') return { ok: false, error: 'no_state' };
   if (CLOUD.saving) {
     CLOUD.saveQueued = true;
@@ -984,6 +1000,7 @@ const WORLD = {
   room: '',
   realms: new Map(),
   wanted: false,
+  ever: false,
   lastSt: 0,
   lastSig: '',
   backoff: 800,
@@ -1004,7 +1021,7 @@ function monarchLocal(r) {
   const me = myWorldSpawn();
   return { x: CX + (r.spawn.x + (r.mx - CX) - me.x), y: CY + (r.spawn.y + (r.my - CY) - me.y) };
 }
-function canWalkWorld() { return isEndlessCloud(); }
+function canWalkWorld() { return isWorldLive(); }
 
 function upsertRealm(r) {
   if (!r || !r.id || (CLOUD.kingdom && r.id === CLOUD.kingdom.id)) return;
@@ -1040,7 +1057,13 @@ function connectWorld() {
   try { ws = new WebSocket(worldUrl()); }
   catch (e) { scheduleWorldReconnect(); return; }
   WORLD.ws = ws;
-  ws.onopen = () => { WORLD.backoff = 800; sendWorldState(true); };
+  ws.onopen = () => {
+    WORLD.ever = true;
+    WORLD.backoff = 800;
+    CLOUD.offline = false;
+    sendWorldState(true);
+    updateCloudNote();
+  };
   ws.onmessage = ev => {
     let msg;
     try { msg = JSON.parse(ev.data); } catch (e) { return; }
@@ -1048,6 +1071,7 @@ function connectWorld() {
   };
   ws.onclose = () => {
     if (WORLD.ws === ws) WORLD.ws = null;
+    updateCloudNote();
     if (WORLD.wanted) scheduleWorldReconnect();
   };
   ws.onerror = () => { /* onclose follows */ };
@@ -1242,11 +1266,11 @@ function drawRemoteRealms() {
 
 function showOverlay(id) {
   closeInspect();
-  for (const k of ['title', 'loadout', 'over', 'account']) {
+  for (const k of ['title', 'loadout', 'over', 'account', 'needNet']) {
     const el = $(k);
     if (el) el.hidden = k !== id;
   }
-  if (id === 'title' || id === 'loadout' || id === 'account') {
+  if (id === 'title' || id === 'loadout' || id === 'account' || id === 'needNet') {
     $('hud').hidden = true;
     $('bar').hidden = true;
     showMenu(false);
@@ -1254,18 +1278,26 @@ function showOverlay(id) {
   }
 }
 function showTitle() {
-  disconnectWorld();
   S = null;
+  disconnectWorld();
   showOverlay('title');
   $('hint').textContent = '';
   clearToasts();
+  updateCloudNote();
 }
 function openLoadout() {
   showOverlay('loadout');
   renderLoadout();
 }
 function startEndless() {
+  if (!CLOUD.token || CLOUD.forceOffline) {
+    if (CLOUD.forceOffline || CLOUD.offline) showNeedNet();
+    else openAccount();
+    return false;
+  }
   newGame({ mode: 'endless' });
+  connectWorld();
+  return true;
 }
 function startChallenge(opts) {
   opts = opts || {};
@@ -1486,6 +1518,7 @@ function newGame(opts) {
   $('title').hidden = true;
   $('loadout').hidden = true;
   if ($('account')) $('account').hidden = true;
+  if ($('needNet')) $('needNet').hidden = true;
   $('over').hidden = true;
   $('hud').hidden = false;
   $('bar').hidden = false;
@@ -1637,13 +1670,14 @@ function startPinch() {
 }
 function onWheelZoom(e) {
   e.preventDefault();
-  if (!S || S.over) return;
+  if (!S || S.over || worldInputBlocked()) return;
   const factor = Math.pow(0.999, e.deltaY);
   setZoomAt(zoom * factor, e.clientX, e.clientY);
 }
 cv.addEventListener('wheel', onWheelZoom, { passive: false });
 cv.addEventListener('pointerdown', e => {
   e.preventDefault();
+  if (worldInputBlocked()) return;
   pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
   try { cv.setPointerCapture(e.pointerId); } catch (_) {}
   if (pts.size >= 2) { startPinch(); return; }
@@ -1656,6 +1690,7 @@ cv.addEventListener('pointerdown', e => {
   }
 });
 cv.addEventListener('pointermove', e => {
+  if (worldInputBlocked()) return;
   if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pinch && pts.size >= 2) {
     const arr = [...pts.values()];
@@ -1700,6 +1735,7 @@ const endPtr = e => {
 };
 cv.addEventListener('pointerup', endPtr); cv.addEventListener('pointercancel', endPtr);
 addEventListener('keydown', e => {
+  if (worldInputBlocked()) return;
   keys[e.key.toLowerCase()] = true;
   if (e.key === 'Escape' && (PUI.inspectId || (S && (S.sel || S.build)))) {
     e.preventDefault();
@@ -1717,13 +1753,13 @@ document.addEventListener('dblclick', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault());
 
 $('bar').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b || !S || S.over) return;
+  const b = e.target.closest('button'); if (!b || !S || S.over || worldInputBlocked()) return;
   const a = b.dataset.act;
   if (a === 'build') { if (S.sel) { clearSel(); return; } if (S.build) setBuild(null); else showMenu($('buildMenu').hidden); return; }
   if (a === 'rally') { showMenu(false); toggleRally(); }
 });
 $('buildMenu').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b || !S || S.over) return;
+  const b = e.target.closest('button'); if (!b || !S || S.over || worldInputBlocked()) return;
   if (b.disabled || b.classList.contains('locked-opt')) {
     const act = b.dataset.act;
     if ((act === 'wall' || act === 'gate') && hasCurse('nowalls')) toast('No Walls Pact forbids walls and gates', 'bad');
@@ -1735,7 +1771,7 @@ $('buildMenu').addEventListener('click', e => {
 });
 const dropBtn = $('btnDrop');
 dropBtn.addEventListener('pointerdown', e => {
-  e.preventDefault(); if (!S || S.over) return;
+  e.preventDefault(); if (!S || S.over || worldInputBlocked()) return;
   showMenu(false);
   S.dropHold = true; S.dropT = 0.4; dropCoin();
   try { dropBtn.setPointerCapture(e.pointerId); } catch (_) {}
@@ -1745,7 +1781,10 @@ const dropEnd = () => { if (S) S.dropHold = false; dropBtn.classList.remove('hel
 for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) dropBtn.addEventListener(t, dropEnd);
 $('btnSkip').hidden = !DEBUG;
 $('btnSkip').addEventListener('click', () => { if (DEBUG) skipPhase(); });
-$('btnRestart').addEventListener('click', () => newGame({ mode: (S && S.mode) || 'endless' }));
+$('btnRestart').addEventListener('click', () => {
+  if (!S || S.mode === 'endless') startEndless();
+  else newGame({ mode: S.mode });
+});
 $('btnRetry').addEventListener('click', () => startChallenge({ curses: lastChallenge.curses, blessings: lastChallenge.blessings, retry: true }));
 $('btnMenu').addEventListener('click', () => showTitle());
 $('btnEndless').addEventListener('click', () => openAccount());
@@ -1753,7 +1792,8 @@ $('btnChallenge').addEventListener('click', () => openLoadout());
 $('btnAcctBack').addEventListener('click', () => showTitle());
 $('btnSignIn').addEventListener('click', () => requestSignIn($('acctName').value, $('acctPass').value));
 $('btnSignUp').addEventListener('click', () => requestCreateKingdom());
-$('btnPlayOffline').addEventListener('click', () => requestPlayOffline());
+if ($('btnNeedRetry')) $('btnNeedRetry').addEventListener('click', () => openAccount());
+if ($('btnNeedChallenge')) $('btnNeedChallenge').addEventListener('click', () => openLoadout());
 $('acctPass').addEventListener('keydown', e => { if (e.key === 'Enter') requestSignIn($('acctName').value, $('acctPass').value); });
 $('btnLoadoutBack').addEventListener('click', () => showTitle());
 $('btnStartChallenge').addEventListener('click', () => startChallenge());
@@ -1763,6 +1803,7 @@ if ($('btnWorldClose')) $('btnWorldClose').addEventListener('click', () => close
 $('inspectActions').addEventListener('click', e => {
   const btn = e.target.closest('button');
   if (!btn || btn.disabled || !PUI.inspectId) return;
+  if (worldInputBlocked()) return;
   const act = btn.dataset.act;
   if (act === 'upgrade') requestUpgrade(PUI.inspectId, {});
   else if (act === 'cannon' || act === 'ballista') requestUpgrade(PUI.inspectId, { path: act });
@@ -4020,6 +4061,7 @@ function tickOverlapMon(dt) {
   for (const u of S.undead) acc(u, false, u.kind || 'undead');
 }
 function tryMove(e, nx, ny, friend) {
+  if (S && e === S.monarch && worldInputBlocked()) return false;
   if (!(S && e === S.monarch && canWalkWorld())) {
     nx = clamp(nx, 10, W - 10); ny = clamp(ny, 10, H - 10);
   }
@@ -4045,6 +4087,7 @@ function edgeScrollWall(dt) {
 }
 function update(dt) {
   if (!S || S.over) return;
+  if (worldInputBlocked()) return;
   ensureNav();
   nav.repaths = 0;
   followCam(dt);
@@ -7908,7 +7951,8 @@ window.__bc = {
   CURSES, BLESSINGS, hasCurse, hasBless, loadoutMultiplier, fmtMult,
   timeBonus, realmBonus, scoreBase, finalScore, enemyMods, buildCost, toolStockCost,
   showTitle, openLoadout, startEndless, startChallenge, openAccount,
-  requestSignUp, requestSignIn, requestPlayOffline, requestSaveKingdom, requestSignOut,
+  requestSignUp, requestSignIn, requestSaveKingdom, requestSignOut,
+  showNeedNet, worldInputBlocked, isWorldLive,
   requestCreateKingdom, snapCell, cellWorldBounds, spawnInCell,
   serializeKingdom, applyKingdomState,
   openWorld, closeWorld, lookAtRealm, connectWorld, disconnectWorld,
@@ -7916,6 +7960,8 @@ window.__bc = {
     return {
       room: WORLD.room,
       connected: !!(WORLD.ws && WORLD.ws.readyState === 1),
+      blocked: worldInputBlocked(),
+      ever: !!WORLD.ever,
       realms: [...WORLD.realms.values()].map(r => ({
         id: r.id, name: r.name, spawn: r.spawn, nights: r.nights, online: !!r.online,
         mx: r.mx, my: r.my,
@@ -7926,7 +7972,25 @@ window.__bc = {
   forceGeoDenied(v) { CLOUD.forceGeoDenied = !!v; },
   get apiBase() { return apiBase(); },
   set apiBase(v) { window.__bc._apiBase = v; CLOUD.api = v; },
-  forceOffline(v) { CLOUD.forceOffline = !!v; if (v) CLOUD.offline = true; updateCloudNote(); },
+  forceOffline(v) {
+    CLOUD.forceOffline = !!v;
+    if (v) {
+      CLOUD.offline = true;
+      CLOUD.lastError = 'offline';
+      WORLD.wanted = false;
+      if (WORLD.timer) { clearTimeout(WORLD.timer); WORLD.timer = 0; }
+      const ws = WORLD.ws;
+      WORLD.ws = null;
+      if (ws) {
+        try { ws.onclose = null; ws.onerror = null; ws.onmessage = null; ws.close(); } catch (e) {}
+      }
+    } else {
+      if (CLOUD.lastError === 'offline') CLOUD.lastError = '';
+      CLOUD.offline = false;
+      if (isEndlessCloud()) connectWorld();
+    }
+    updateCloudNote();
+  },
   get cloud() {
     return {
       token: !!CLOUD.token,
@@ -7936,7 +8000,6 @@ window.__bc = {
       cell: CLOUD.kingdom && CLOUD.kingdom.cell,
       world: CLOUD.world,
       offline: !!CLOUD.offline,
-      playingOffline: !!CLOUD.playingOffline,
       lastError: CLOUD.lastError,
       lastSaveOk: !!CLOUD.lastSaveOk,
       saving: !!CLOUD.saving,
