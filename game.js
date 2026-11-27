@@ -1719,16 +1719,90 @@ function applyScale() {
   zoom = zoom < zMin ? zMin : zoom > zMax ? zMax : zoom;
   scale = baseScale * zoom;
 }
+let viewOverride = null;
+function visView() {
+  if (viewOverride) {
+    return {
+      offsetTop: +viewOverride.offsetTop || 0,
+      offsetLeft: +viewOverride.offsetLeft || 0,
+      width: +viewOverride.width || innerWidth,
+      height: +viewOverride.height || innerHeight
+    };
+  }
+  const vv = window.visualViewport;
+  if (vv && vv.width && vv.height) {
+    return { offsetTop: vv.offsetTop || 0, offsetLeft: vv.offsetLeft || 0, width: vv.width, height: vv.height };
+  }
+  return { offsetTop: 0, offsetLeft: 0, width: innerWidth, height: innerHeight };
+}
+function applyViewVars(v) {
+  const rgt = Math.max(0, innerWidth - v.offsetLeft - v.width);
+  const bot = Math.max(0, innerHeight - v.offsetTop - v.height);
+  const s = document.documentElement.style;
+  s.setProperty('--vv-top', v.offsetTop + 'px');
+  s.setProperty('--vv-left', v.offsetLeft + 'px');
+  s.setProperty('--vv-right', rgt + 'px');
+  s.setProperty('--vv-bottom', bot + 'px');
+  s.setProperty('--vv-width', v.width + 'px');
+  s.setProperty('--vv-height', v.height + 'px');
+}
 function resize() {
   // Backing store stops at 2x. A 3x phone buffer was the main fill-rate cost.
+  // Size to the visible viewport so the canvas is not taller than what the player sees
+  // (iPhone Safari's URL bar) and so the HUD is not drawn under the browser chrome.
   dpr = Math.min(window.devicePixelRatio || 1, 2);
-  vw = innerWidth; vh = innerHeight;
-  cv.width = Math.round(vw * dpr); cv.height = Math.round(vh * dpr);
-  cv.style.width = vw + 'px'; cv.style.height = vh + 'px';
+  const v = visView();
+  vw = Math.max(1, v.width);
+  vh = Math.max(1, v.height);
+  applyViewVars(v);
+  cv.style.top = v.offsetTop + 'px';
+  cv.style.left = v.offsetLeft + 'px';
+  cv.style.width = vw + 'px';
+  cv.style.height = vh + 'px';
+  cv.width = Math.round(vw * dpr);
+  cv.height = Math.round(vh * dpr);
   baseScale = Math.max(0.55, Math.min(1.3, vw / 560));
   applyScale();
 }
+function viewFromClient(cx, cy) {
+  const r = cv.getBoundingClientRect();
+  const rw = r.width || vw || 1;
+  const rh = r.height || vh || 1;
+  const bw = cv.width || Math.round(rw * (dpr || 1));
+  const bh = cv.height || Math.round(rh * (dpr || 1));
+  // client → canvas backing pixels (includes DPR), then back to CSS view pixels.
+  return {
+    x: (cx - r.left) * (bw / rw) / (dpr || 1),
+    y: (cy - r.top) * (bh / rh) / (dpr || 1)
+  };
+}
+function clientToWorld(cx, cy) {
+  const v = viewFromClient(cx, cy);
+  return s2w(v.x, v.y);
+}
+function worldToClient(wx, wy) {
+  const p = w2s(wx, wy);
+  const r = cv.getBoundingClientRect();
+  const rw = r.width || vw || 1;
+  const rh = r.height || vh || 1;
+  return { x: r.left + p.x * (rw / (vw || 1)), y: r.top + p.y * (rh / (vh || 1)) };
+}
+function simulateVisualViewport(spec) {
+  viewOverride = spec ? {
+    offsetTop: +spec.offsetTop || 0,
+    offsetLeft: +spec.offsetLeft || 0,
+    width: +spec.width || innerWidth,
+    height: +spec.height || innerHeight
+  } : null;
+  resize();
+  return visView();
+}
 addEventListener('resize', resize);
+addEventListener('orientationchange', () => setTimeout(resize, 80));
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', resize);
+  visualViewport.addEventListener('scroll', resize);
+}
 
 function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 function rand() { return (S && S.seeded && S.playRng) ? S.playRng() : Math.random(); }
@@ -1968,26 +2042,29 @@ function onWheelZoom(e) {
   e.preventDefault();
   if (!S || S.over || worldInputBlocked()) return;
   const factor = Math.pow(0.999, e.deltaY);
-  setZoomAt(zoom * factor, e.clientX, e.clientY);
+  const v = viewFromClient(e.clientX, e.clientY);
+  setZoomAt(zoom * factor, v.x, v.y);
 }
 cv.addEventListener('wheel', onWheelZoom, { passive: false });
 cv.addEventListener('pointerdown', e => {
   e.preventDefault();
   if (worldInputBlocked()) return;
-  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const v = viewFromClient(e.clientX, e.clientY);
+  pts.set(e.pointerId, { x: v.x, y: v.y });
   try { cv.setPointerCapture(e.pointerId); } catch (_) {}
   if (pts.size >= 2) { startPinch(); return; }
   if (pinch || pinched) return;
-  ptr = { id: e.pointerId, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, px: e.clientX, py: e.clientY, drag: false, pan: false, t: performance.now(), build: !!(S && S.build) };
+  ptr = { id: e.pointerId, sx: v.x, sy: v.y, x: v.x, y: v.y, px: v.x, py: v.y, drag: false, pan: false, t: performance.now(), build: !!(S && S.build) };
   if (S && !S.over && S.build === 'wall') {
-    const w = s2w(e.clientX, e.clientY);
+    const w = s2w(v.x, v.y);
     wallDrag = { x0: w.x, y0: w.y, x1: w.x, y1: w.y };
     ptr.wall = true;
   }
 });
 cv.addEventListener('pointermove', e => {
   if (worldInputBlocked()) return;
-  if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const v = viewFromClient(e.clientX, e.clientY);
+  if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: v.x, y: v.y });
   if (pinch && pts.size >= 2) {
     const arr = [...pts.values()];
     const d = Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y) || 1;
@@ -2001,7 +2078,7 @@ cv.addEventListener('pointermove', e => {
   }
   if (!ptr || e.pointerId !== ptr.id) return;
   const lx = ptr.x, ly = ptr.y;
-  ptr.x = e.clientX; ptr.y = e.clientY;
+  ptr.x = v.x; ptr.y = v.y;
   if (Math.hypot(ptr.x - ptr.sx, ptr.y - ptr.sy) > 14) ptr.drag = true;
   if (wallDrag && ptr.wall) {
     const w = s2w(ptr.x, ptr.y);
@@ -2252,22 +2329,97 @@ function tickSel() {
   if (gone || performance.now() - (S.sel.t0 || 0) > (TUNE.sendTimeout || 6) * 1000) clearSel();
 }
 
+function decorSpriteBox(o) {
+  if (!o || !S) return null;
+  const sc = o.s || 1;
+  let spr = null;
+  if (S.trees.includes(o) || o.kind === 'tree') {
+    const pale = S.regions[o.rid] && S.regions[o.rid].owner === 'pale';
+    spr = pale ? Art.dead : (Art.tree && (Art.tree[o.v] || Art.tree[0]));
+  } else if (S.rocks.includes(o) || o.kind === 'rock') {
+    spr = Art.rock && (Art.rock[o.v] || Art.rock[0]);
+  }
+  if (!spr) return null;
+  const gy = (spr.gy != null ? spr.gy : spr.h) * sc;
+  const w = spr.w * sc, h = spr.h * sc;
+  return { l: o.x - w / 2, r: o.x + w / 2, t: o.y - gy, b: o.y + Math.max(0, h - gy) };
+}
+function inFootprint(o, x, y, pad) {
+  return !!o && dist(o, { x, y }) <= (o.r || 16) + (pad == null ? 8 : pad);
+}
+function inDecorSprite(o, x, y, pad) {
+  const box = decorSpriteBox(o);
+  if (!box) return false;
+  const p = pad == null ? 8 : pad;
+  return x >= box.l - p && x <= box.r + p && y >= box.t - p && y <= box.b + p;
+}
+function nearestDecorFootprint(x, y) {
+  let best = null, bd = 1e9;
+  const consider = (o) => {
+    if (!inFootprint(o, x, y, 8)) return;
+    const d = dist(o, { x, y });
+    if (d < bd) { bd = d; best = o; }
+  };
+  for (const t of S.trees) consider(t);
+  for (const rk of S.rocks) consider(rk);
+  return best;
+}
+function nearestDecorSprite(x, y) {
+  let best = null, bd = 1e9;
+  const consider = (o) => {
+    if (!inDecorSprite(o, x, y, 8)) return;
+    const d = dist(o, { x, y });
+    if (d < bd) { bd = d; best = o; }
+  };
+  for (const t of S.trees) consider(t);
+  for (const rk of S.rocks) consider(rk);
+  return best;
+}
+function buildingAtFootprint(x, y) {
+  let best = null, bd = 1e9;
+  const pad = 10;
+  for (const b of inspectables()) {
+    const d = dist(b, { x, y });
+    if (d <= (b.r || 16) + pad && d < bd) { bd = d; best = b; }
+  }
+  return best;
+}
+function tapSubjectAt(x, y) {
+  if (!S) return null;
+  const foot = nearestDecorFootprint(x, y);
+  const spr = nearestDecorSprite(x, y);
+  const bld = buildingAtFootprint(x, y);
+  const nearer = (a, b) => (dist(a, { x, y }) <= dist(b, { x, y }) ? a : b);
+  // Trees and rocks: their own footprint wins first. A building only wins on its
+  // base/footprint, never on a tall sprite hanging over something in front.
+  if (foot && bld) return { kind: nearer(foot, bld) === foot ? 'decor' : 'building', obj: nearer(foot, bld) };
+  if (foot) return { kind: 'decor', obj: foot };
+  if (spr && bld) {
+    // Canopy/trunk in front of the building (south of the baseline) is the tree.
+    // A tap on the building's baseline or body stays the building.
+    if (y > bld.y + 4 && spr.y > bld.y) return { kind: 'decor', obj: spr };
+    return { kind: 'building', obj: bld };
+  }
+  if (spr) return { kind: 'decor', obj: spr };
+  if (bld) return { kind: 'building', obj: bld };
+  return null;
+}
+
 function onTap(sx, sy) {
   if (S.over) return;
   const w = s2w(sx, sy);
   if (S.build === 'clear') return tryMarkDecor(w.x, w.y, true);
   if (S.build === 'demolish') return tryMarkDemo(w.x, w.y, true);
   if (S.build) return tryPlace(S.build, w.x, w.y);
-  const bld = buildingAt(w.x, w.y, Math.max(44, 64 / scale));
+  const sub = tapSubjectAt(w.x, w.y);
+  const bld = sub && sub.kind === 'building' ? sub.obj : null;
+  const decor = sub && sub.kind === 'decor' ? sub.obj : null;
   const hit = workerAt(w.x, w.y);
-  const decor = decorAt(w.x, w.y, Math.max(28, 48 / scale));
   // A selected worker stays in "tap where to send" mode — don't steal the dest tap for inspect.
-  // A tree or rock under the finger wins over a nearby building, so a mark tap is not eaten by inspect.
   if (!S.sel && bld) {
     const bD = dist(bld, w) - (bld.r || 16);
     const hD = hit ? dist(hit, w) - (hit.r || 9) : 1e9;
-    const decD = decor ? dist(decor, w) - (decor.r || 16) : 1e9;
-    if ((!hit || bD <= hD + 6) && !(decor && decD <= bD + 8)) {
+    if (!hit || bD <= hD + 6) {
       openInspect(bld);
       return;
     }
@@ -2333,8 +2485,8 @@ function markClear(obj) {
   return obj;
 }
 function tryMarkDecor(x, y, mode) {
-  const rad = Math.max(36, 48 / scale);
-  const hit = decorAt(x, y, rad);
+  const sub = tapSubjectAt(x, y);
+  const hit = (sub && sub.kind === 'decor') ? sub.obj : (mode ? decorAt(x, y, Math.max(36, 48 / scale)) : null);
   if (!hit) { if (mode) toast('Tap a tree or rock to clear it'); return null; }
   if (dist(hit, S.monarch) > TUNE.clearMarkRange) {
     if (mode) toast('Move closer to mark that', 'bad');
@@ -8296,13 +8448,13 @@ function frame(now) {
 
 // ---------- debug / test hooks ----------
 window.__bc = {
-  get S() { return S; }, get fps() { return fps; }, w2s, s2w, regionIdAt, skipPhase, newGame,
+  get S() { return S; }, get fps() { return fps; }, w2s, s2w, viewFromClient, clientToWorld, worldToClient, visView, simulateVisualViewport, regionIdAt, skipPhase, newGame,
   get zoom() { return zoom; }, set zoom(z) { zoom = z; applyScale(); },
   get scale() { return scale; },
   get lookX() { return lookX; }, set lookX(v) { lookX = v; },
   get lookY() { return lookY; }, set lookY(v) { lookY = v; },
   get lookFree() { return lookFree; }, set lookFree(v) { lookFree = !!v; },
-  setBuild, setZoomAt, planWallLine, commitWallLine, placeBlocked, swapWallForGate, gateOpen, solidAt, tryMove, tryPlace, placeBld, damage, onBuilt,
+  setBuild, setZoomAt, planWallLine, commitWallLine, placeBlocked, swapWallForGate, gateOpen, solidAt, tryMove, tryPlace, placeBld, damage, onBuilt, tapSubjectAt,
   decorAt, markClear, tryMarkDecor, finishClear, tryMarkDemo, finishDemo, unmarkDemo,
   get wallDrag() { return wallDrag; },
   setWallDrag(x0, y0, x1, y1) { wallDrag = { x0, y0, x1, y1, plan: planWallLine(x0, y0, x1, y1) }; return wallDrag.plan; },
